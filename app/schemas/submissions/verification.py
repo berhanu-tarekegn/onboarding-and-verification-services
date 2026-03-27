@@ -54,6 +54,31 @@ class VerificationStepRunRead(SQLModel):
     expires_at: Optional[datetime] = None
 
 
+class VerificationStepSummaryRead(SQLModel):
+    """Compact verification step view for submission list/search APIs."""
+
+    step_key: str
+    status: str
+    outcome: Optional[str] = None
+    result_snapshot: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VerificationRunSummaryRead(SQLModel):
+    """Compact verification run view for submission list/search APIs."""
+
+    id: UUID
+    flow_key: str
+    journey: str
+    status: str
+    decision: Optional[str] = None
+    kyc_level: Optional[str] = None
+    current_step_key: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    deferred_until: Optional[datetime] = None
+    steps: List[VerificationStepSummaryRead] = Field(default_factory=list)
+
+
 class VerificationRunRead(SQLModel):
     """Response model for a verification flow runtime instance."""
 
@@ -74,4 +99,3 @@ class VerificationRunRead(SQLModel):
     completed_at: Optional[datetime] = None
     deferred_until: Optional[datetime] = None
     steps: List[VerificationStepRunRead] = Field(default_factory=list)
-

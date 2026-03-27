@@ -105,8 +105,8 @@ _CONSTRAINT_MESSAGES: dict[str, str] = {
     # Submission answers
     "uq_answer_submission_question": "An answer for this question already exists in the submission.",
     # Tenants
-    "tenants_schema_name_key": "A tenant with this schema_name already exists.",
-    "ix_tenants_schema_name": "A tenant with this schema_name already exists.",
+    "tenants_schema_name_key": "A tenant with this tenant_key already exists.",
+    "ix_tenants_schema_name": "A tenant with this tenant_key already exists.",
     # Baseline templates
     "uq_baseline_template_type_level": "A baseline template with this template_type and level already exists.",
     # Products

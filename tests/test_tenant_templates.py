@@ -366,7 +366,7 @@ class TestTenantIsolation:
         """Create a second tenant and verify it cannot see the first tenant's template."""
         r = await client.post(
             "/api/v1/tenants",
-            json={"name": "Second Bank", "schema_name": "second_bank"},
+            json={"name": "Second Bank", "tenant_key": "second_bank"},
         )
         assert r.status_code == 201
         second_id = r.json()["id"]

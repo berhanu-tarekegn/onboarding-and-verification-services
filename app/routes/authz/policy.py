@@ -20,23 +20,25 @@ from app.models.public.tenant import Tenant
 router = APIRouter(prefix="/authz", tags=["authz"])
 
 
-def _require_provisioning_key(
+def _require_initialization_key(
+    x_initialization_key: str | None = Header(default=None, alias="X-Initialization-Key"),
     x_provisioning_key: str | None = Header(default=None, alias="X-Provisioning-Key"),
 ) -> None:
     expected = (get_settings().PLATFORM_PROVISIONING_API_KEY or "").strip()
     if not expected:
         return
-    if (x_provisioning_key or "").strip() != expected:
+    provided = (x_initialization_key or x_provisioning_key or "").strip()
+    if provided != expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "forbidden", "message": "Missing or invalid provisioning key."},
+            detail={"code": "forbidden", "message": "Missing or invalid tenant initialization key."},
         )
 
 
 @router.get("/policy", response_model=AuthzPolicyRead)
 async def get_global_policy(
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
     row = await policy_svc.get_global_policy(session)
@@ -47,7 +49,7 @@ async def get_global_policy(
 async def update_global_policy(
     body: AuthzPolicyUpdate,
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
     row = await policy_svc.upsert_global_policy(session, policy=body.policy.model_dump())
@@ -71,10 +73,10 @@ async def _resolve_tenant_uuid_by_realm(session: AsyncSession, *, realm: str) ->
 async def get_realm_policy(
     realm: str,
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
-    """Get the tenant policy resolved by realm (schema_name/keycloak_realm).
+    """Get the tenant policy resolved by tenant key / realm.
 
     This endpoint is tenant-linked and returns 404 if no tenant exists.
     """
@@ -90,10 +92,10 @@ async def upsert_realm_policy(
     realm: str,
     body: AuthzPolicyUpdate,
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
-    """Upsert tenant policy resolved by realm (schema_name/keycloak_realm).
+    """Upsert tenant policy resolved by tenant key / realm.
 
     This endpoint is tenant-linked and returns 404 if no tenant exists.
     """
@@ -106,7 +108,7 @@ async def upsert_realm_policy(
 async def get_realm_policy_unlinked(
     realm: str,
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
     """Get realm policy stored by realm key even if no tenant exists yet."""
@@ -121,7 +123,7 @@ async def upsert_realm_policy_unlinked(
     realm: str,
     body: AuthzPolicyUpdate,
     _ctx: AuthContext = Depends(require_platform_super_admin()),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     session: AsyncSession = Depends(get_public_session),
 ):
     """Upsert realm policy stored by realm key even if no tenant exists yet."""

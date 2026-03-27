@@ -17,13 +17,13 @@ Use two identity layers:
    - only this realm may issue tokens with `super_admin`
 
 2. Tenant realms
-   - one realm per tenant, usually the same as `schema_name`
+   - one realm per tenant, usually the same as `tenant_key`
    - contain tenant admins and tenant users
-   - provisioned by this service when a tenant is created
+   - initialized by this service when a tenant is created
 
 ## App Environment
 
-Set the app to expect per-realm tenant claim namespaces and Keycloak provisioning:
+Set the app to expect per-realm tenant claim namespaces and Keycloak tenant initialization:
 
 ```env
 AUTH_ENABLED=true
@@ -35,8 +35,8 @@ KEYCLOAK_ADMIN_BASE_URL=https://sso.example.com
 KEYCLOAK_TRUSTED_ISSUER_BASES=https://sso.example.com
 KEYCLOAK_REALMS=
 
-KEYCLOAK_PROVISIONING_ENABLED=true
-KEYCLOAK_PROVISIONING_REQUIRED=true
+KEYCLOAK_TENANT_INITIALIZATION_ENABLED=true
+KEYCLOAK_TENANT_INITIALIZATION_REQUIRED=true
 KEYCLOAK_ADMIN_REALM=master
 KEYCLOAK_ADMIN_CLIENT_ID=oaas-provisioner
 KEYCLOAK_ADMIN_CLIENT_SECRET=REPLACE_ME
@@ -131,7 +131,7 @@ On recent Keycloak versions this is usually done with client roles under `realm-
 
 ## Step 3: What the App Provisions for Each Tenant
 
-When you create a tenant through the API and `KEYCLOAK_PROVISIONING_ENABLED=true`, the app will:
+When you create a tenant through the API and `KEYCLOAK_TENANT_INITIALIZATION_ENABLED=true`, the app will:
 
 1. create the tenant realm if it does not exist
 2. create realm roles:
@@ -174,16 +174,14 @@ curl -sS -X POST "http://127.0.0.1:7090/api/v1/tenants" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme Bank",
-    "schema_name": "acme_bank",
-    "display_name": "Acme Bank",
-    "is_active": true
+    "tenant_key": "acme_bank"
   }'
 ```
 
 Expected result:
 
-- PostgreSQL tenant schema is provisioned
-- Keycloak realm `acme_bank` is provisioned
+- PostgreSQL tenant schema is initialized
+- Keycloak realm `acme_bank` is initialized
 - tenant client `oaas-client` is created
 - bootstrap tenant users are created if configured
 
@@ -234,7 +232,34 @@ curl -sS -X POST "http://127.0.0.1:7090/api/v1/tenants/REPLACE_WITH_TENANT_UUID/
 
 A tenant admin cannot manage another tenant's realm.
 
-## Step 7: Platform Super Admin on Tenant-Scoped Routes
+## Step 7: Machine-to-Machine Tenant Tokens
+
+Third-party tenant systems can obtain a client-credentials token through the app proxy:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:7090/api/auth/service-token/acme_bank" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "submissions.read"
+  }'
+```
+
+This proxies Keycloak `grant_type=client_credentials` using the tenant realm client credentials already configured for the service.
+
+Use the returned bearer token on tenant-scoped APIs together with `X-Tenant-ID`:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:7090/api/v1/submissions/search" \
+  -H "Authorization: Bearer REPLACE_WITH_SERVICE_TOKEN" \
+  -H "X-Tenant-ID: acme_bank" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "verification_decision": "approved",
+    "limit": 25
+  }'
+```
+
+## Step 8: Platform Super Admin on Tenant-Scoped Routes
 
 For tenant-scoped routes, a platform super admin must pass `X-Tenant-ID`.
 

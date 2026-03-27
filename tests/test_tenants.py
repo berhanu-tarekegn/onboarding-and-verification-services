@@ -2,8 +2,8 @@
 
 Covers:
 * CRUD lifecycle (create, list, get, update, delete)
-* schema_name format validation (lowercase, no hyphens, no spaces, length)
-* Duplicate schema_name rejection
+* tenant_key format validation (lowercase, no hyphens, no spaces, length)
+* Duplicate tenant_key rejection
 * UUID-based retrieval and 404 behaviour
 """
 
@@ -22,7 +22,7 @@ class TestCreateTenant:
         r = await client.post("/api/v1/tenants", json=make_tenant_payload("acme_bank", "Acme Bank"))
         assert r.status_code == 201
         body = r.json()
-        assert body["schema_name"] == "acme_bank"
+        assert body["tenant_key"] == "acme_bank"
         assert body["name"] == "Acme Bank"
         assert body["is_active"] is True
         assert "id" in body
@@ -30,35 +30,35 @@ class TestCreateTenant:
         assert "created_at" in body
         assert "updated_at" in body
 
-    async def test_schema_name_with_uppercase_rejected(self, client: AsyncClient):
+    async def test_tenant_key_with_uppercase_rejected(self, client: AsyncClient):
         r = await client.post("/api/v1/tenants", json=make_tenant_payload("AcmeBank"))
         assert r.status_code == 422
 
-    async def test_schema_name_with_hyphen_rejected(self, client: AsyncClient):
+    async def test_tenant_key_with_hyphen_rejected(self, client: AsyncClient):
         r = await client.post("/api/v1/tenants", json=make_tenant_payload("acme-bank"))
         assert r.status_code == 422
 
-    async def test_schema_name_with_space_rejected(self, client: AsyncClient):
+    async def test_tenant_key_with_space_rejected(self, client: AsyncClient):
         r = await client.post("/api/v1/tenants", json=make_tenant_payload("acme bank"))
         assert r.status_code == 422
 
-    async def test_schema_name_exceeding_63_chars_rejected(self, client: AsyncClient):
+    async def test_tenant_key_exceeding_63_chars_rejected(self, client: AsyncClient):
         long_name = "a" * 64
         r = await client.post("/api/v1/tenants", json=make_tenant_payload(long_name))
         assert r.status_code == 422
 
-    async def test_duplicate_schema_name_rejected(self, client: AsyncClient, tenant: dict):
+    async def test_duplicate_tenant_key_rejected(self, client: AsyncClient, tenant: dict):
         r = await client.post(
             "/api/v1/tenants",
-            json=make_tenant_payload(tenant["schema_name"], "Another Bank"),
+            json=make_tenant_payload(tenant["tenant_key"], "Another Bank"),
         )
         assert r.status_code in (409, 422)
 
     async def test_missing_name_rejected(self, client: AsyncClient):
-        r = await client.post("/api/v1/tenants", json={"schema_name": "no_name"})
+        r = await client.post("/api/v1/tenants", json={"tenant_key": "no_name"})
         assert r.status_code == 422
 
-    async def test_missing_schema_name_rejected(self, client: AsyncClient):
+    async def test_missing_tenant_key_rejected(self, client: AsyncClient):
         r = await client.post("/api/v1/tenants", json={"name": "No Schema"})
         assert r.status_code == 422
 
@@ -115,15 +115,15 @@ class TestUpdateTenant:
         assert r.status_code == 200
         assert r.json()["is_active"] is False
 
-    async def test_schema_name_is_not_updatable(self, client: AsyncClient, tenant: dict):
-        """schema_name must NOT be present in the update schema — it should be ignored."""
+    async def test_tenant_key_is_not_updatable(self, client: AsyncClient, tenant: dict):
+        """tenant_key must NOT be present in the update schema — it should be ignored."""
         r = await client.patch(
             f"/api/v1/tenants/{tenant['id']}",
-            json={"schema_name": "hacked_schema"},
+            json={"tenant_key": "hacked_schema"},
         )
         # Either rejected (422) or silently ignored; the stored value must not change
         if r.status_code == 200:
-            assert r.json()["schema_name"] == tenant["schema_name"]
+            assert r.json()["tenant_key"] == tenant["tenant_key"]
 
     async def test_update_nonexistent_returns_404(self, client: AsyncClient):
         r = await client.patch(

@@ -21,19 +21,24 @@ router = APIRouter(
     tags=["tenants"],
 )
 
-def _require_provisioning_key(x_provisioning_key: str | None = Header(default=None, alias="X-Provisioning-Key")) -> None:
-    """Optional internal guard for platform provisioning endpoints.
+def _require_initialization_key(
+    x_initialization_key: str | None = Header(default=None, alias="X-Initialization-Key"),
+    x_provisioning_key: str | None = Header(default=None, alias="X-Provisioning-Key"),
+) -> None:
+    """Optional internal guard for platform tenant initialization endpoints.
 
-    When PLATFORM_PROVISIONING_API_KEY is set, callers must include a matching
-    X-Provisioning-Key header.
+    When PLATFORM_INITIALIZATION_API_KEY is set, callers must include a matching
+    initialization header. `X-Provisioning-Key` remains accepted for backwards
+    compatibility.
     """
     expected = (get_settings().PLATFORM_PROVISIONING_API_KEY or "").strip()
     if not expected:
         return
-    if (x_provisioning_key or "").strip() != expected:
+    provided = (x_initialization_key or x_provisioning_key or "").strip()
+    if provided != expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "forbidden", "message": "Missing or invalid provisioning key."},
+            detail={"code": "forbidden", "message": "Missing or invalid tenant initialization key."},
         )
 
 def _assert_tenant_admin_scope(ctx: AuthContext, tenant: Tenant) -> None:
@@ -52,16 +57,17 @@ def _assert_tenant_admin_scope(ctx: AuthContext, tenant: Tenant) -> None:
 async def create_tenant(
     data: TenantCreate,
     session: AsyncSession = Depends(get_public_session),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     _ctx=Depends(require_platform_super_admin()),
 ):
-    """Register a new tenant and provision its database schema."""
-    return await tenant_svc.create_tenant(
+    """Register a new tenant and run tenant initialization."""
+    tenant = await tenant_svc.create_tenant(
         data,
         session,
         engine=get_engine(),
         database_url=get_settings().DATABASE_URL,
     )
+    return TenantRead.from_tenant(tenant)
 
 
 @router.get("", response_model=list[TenantRead])
@@ -70,7 +76,7 @@ async def list_tenants(
     _ctx=Depends(require_platform_super_admin()),
 ):
     """List all tenants."""
-    return await tenant_svc.list_tenants(session)
+    return [TenantRead.from_tenant(tenant) for tenant in await tenant_svc.list_tenants(session)]
 
 
 @router.get("/{tenant_id}", response_model=TenantRead)
@@ -80,7 +86,7 @@ async def get_tenant(
     _ctx=Depends(require_platform_super_admin()),
 ):
     """Get a tenant by ID."""
-    return await tenant_svc.get_tenant(tenant_id, session)
+    return TenantRead.from_tenant(await tenant_svc.get_tenant(tenant_id, session))
 
 
 @router.patch("/{tenant_id}", response_model=TenantRead)
@@ -91,7 +97,7 @@ async def update_tenant(
     _ctx=Depends(require_platform_super_admin()),
 ):
     """Partially update a tenant."""
-    return await tenant_svc.update_tenant(tenant_id, data, session)
+    return TenantRead.from_tenant(await tenant_svc.update_tenant(tenant_id, data, session))
 
 
 @router.delete("/{tenant_id}", response_model=TenantRead)
@@ -99,7 +105,7 @@ async def delete_tenant(
     tenant_id: UUID,
     session: AsyncSession = Depends(get_public_session),
     hard_delete: bool = Query(False, description="Drop tenant schema and delete tenant record."),
-    _guard: None = Depends(_require_provisioning_key),
+    _guard: None = Depends(_require_initialization_key),
     _ctx=Depends(require_platform_super_admin()),
 ):
     """Delete a tenant.
@@ -107,12 +113,13 @@ async def delete_tenant(
     - hard_delete=false (default): soft-delete (sets is_active=False)
     - hard_delete=true: drop tenant schema and delete the tenant row
     """
-    return await tenant_svc.delete_tenant(
+    tenant = await tenant_svc.delete_tenant(
         tenant_id,
         session,
         hard_delete=hard_delete,
         engine=get_engine(),
     )
+    return TenantRead.from_tenant(tenant)
 
 
 @router.post("/{tenant_id}/users", response_model=TenantUserRead, status_code=201)

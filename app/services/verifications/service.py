@@ -23,7 +23,9 @@ from app.models.tenant.verification import VerificationRun, VerificationStepRun
 from app.schemas.submissions.verification import (
     VerificationActionRequest,
     VerificationRunRead,
+    VerificationRunSummaryRead,
     VerificationStartRequest,
+    VerificationStepSummaryRead,
     VerificationStepRunRead,
 )
 from app.services import tenant_templates as tenant_template_svc
@@ -74,6 +76,18 @@ async def get_latest_verification_run(
     if run is None:
         return None
     return await _serialize_run(run, session)
+
+
+async def get_latest_verification_summary(
+    submission_id: UUID,
+    session: AsyncSession,
+) -> VerificationRunSummaryRead | None:
+    submission = await _get_submission(submission_id, session)
+    run = await _get_latest_run(submission.id, session)
+    if run is None:
+        return None
+    steps = await _list_step_runs(run.id, session)
+    return build_verification_summary(run, steps)
 
 
 async def start_verification(
@@ -151,6 +165,33 @@ async def append_verification_summary(
     latest = await get_latest_verification_run(submission_id, session)
     payload["verification"] = latest
     return payload
+
+
+def build_verification_summary(
+    run: VerificationRun,
+    steps: list[VerificationStepRun],
+) -> VerificationRunSummaryRead:
+    return VerificationRunSummaryRead(
+        id=run.id,
+        flow_key=run.flow_key,
+        journey=run.journey,
+        status=run.status,
+        decision=run.decision,
+        kyc_level=run.kyc_level,
+        current_step_key=run.current_step_key,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        deferred_until=run.deferred_until,
+        steps=[
+            VerificationStepSummaryRead(
+                step_key=step.step_key,
+                status=step.status,
+                outcome=step.outcome,
+                result_snapshot=deepcopy(step.result_snapshot or {}),
+            )
+            for step in steps
+        ],
+    )
 
 
 async def _get_submission(submission_id: UUID, session: AsyncSession) -> Submission:

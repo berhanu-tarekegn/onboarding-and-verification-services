@@ -552,6 +552,61 @@ async def refresh(
     return _safe_json_response(resp)
 
 
+@router.post("/service-token/{realm}")
+async def service_token(
+    realm: str,
+    request: Request,
+) -> Any:
+    """Client-credentials token flow for machine-to-machine tenant integrations."""
+    await _realm_allowed(realm)
+    await _warn_if_default_client_mismatch(realm)
+    body = await _read_body(request)
+    client_alias = body.get("client") or body.get("client_alias")
+    if client_alias is not None and (not isinstance(client_alias, str) or not client_alias.strip()):
+        raise _bad_request("client must be a non-empty string when provided.")
+    scope = body.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not scope.strip()):
+        raise _bad_request("scope must be a non-empty string when provided.")
+
+    client_id, client_secret = await _client_for_realm_async(
+        realm,
+        client_alias=client_alias.strip() if isinstance(client_alias, str) else None,
+    )
+    data: dict[str, Any] = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+    }
+    if client_secret:
+        data["client_secret"] = client_secret
+    if isinstance(scope, str) and scope.strip():
+        data["scope"] = scope.strip()
+
+    resp = await _post_to_keycloak_realm_with_fallback(realm, data=data)
+    if resp.status_code in (400, 401):
+        debug_details = None
+        if get_settings().DEBUG:
+            try:
+                debug_details = {
+                    "upstream_status": resp.status_code,
+                    "upstream_url": str(getattr(getattr(resp, "request", None), "url", "") or ""),
+                    "upstream": resp.json(),
+                }
+            except Exception:  # noqa: BLE001
+                debug_details = {
+                    "upstream_status": resp.status_code,
+                    "upstream_url": str(getattr(getattr(resp, "request", None), "url", "") or ""),
+                    "upstream_body_prefix": (getattr(resp, "text", "") or "")[:500],
+                }
+        raise _unauthorized(
+            "Invalid service client credentials.",
+            code="invalid_client_credentials",
+            details=debug_details,
+        )
+    if resp.status_code != 200:
+        raise _upstream_unavailable(resp)
+    return _safe_json_response(resp)
+
+
 @router.get("/me")
 async def me(
     request: Request,

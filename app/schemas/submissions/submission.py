@@ -9,7 +9,7 @@ from sqlmodel import SQLModel, Field
 
 from app.models.tenant.submission import SubmissionStatus
 from app.schemas.templates.form_schema import QuestionGroupRead, QuestionRead
-from app.schemas.submissions.verification import VerificationRunRead
+from app.schemas.submissions.verification import VerificationRunRead, VerificationRunSummaryRead
 
 
 # ── Status History Schemas ────────────────────────────────────────────
@@ -149,3 +149,62 @@ class SubmissionListFilters(SQLModel):
     external_ref: Optional[str] = None
     created_after: Optional[datetime] = None
     created_before: Optional[datetime] = None
+
+
+class SubmissionSearchCriterion(SQLModel):
+    """A configured tenant filter applied against submission or verification data."""
+
+    key: str = Field(min_length=1, max_length=255)
+    op: str = Field(default="eq", min_length=1, max_length=32)
+    value: Any = None
+
+
+class SubmissionSearchRequest(SQLModel):
+    """Structured submission search request for portal and partner API use."""
+
+    status: Optional[SubmissionStatus] = None
+    template_id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    submitter_id: Optional[str] = Field(default=None, max_length=255)
+    external_ref: Optional[str] = Field(default=None, max_length=255)
+    created_after: Optional[datetime] = None
+    created_before: Optional[datetime] = None
+    verification_status: Optional[str] = Field(default=None, max_length=50)
+    verification_decision: Optional[str] = Field(default=None, max_length=50)
+    verification_kyc_level: Optional[str] = Field(default=None, max_length=100)
+    verification_current_step_key: Optional[str] = Field(default=None, max_length=255)
+    criteria: List[SubmissionSearchCriterion] = Field(default_factory=list)
+    sort_by: str = Field(default="created_at", max_length=64)
+    sort_order: str = Field(default="desc", max_length=8)
+    skip: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class SubmissionSearchFilterRead(SQLModel):
+    """Tenant-discovered configured filter exposed to portal and third parties."""
+
+    key: str
+    label: str
+    source: str
+    path: str
+    operators: List[str] = Field(default_factory=list)
+    value_type: Optional[str] = None
+    description: Optional[str] = None
+    template_ids: List[UUID] = Field(default_factory=list)
+    template_version_ids: List[UUID] = Field(default_factory=list)
+    ambiguous: bool = False
+
+
+class SubmissionSearchConfigRead(SQLModel):
+    """Catalog of native and tenant-configured submission search filters."""
+
+    native_filters: List[str] = Field(default_factory=list)
+    verification_filters: List[str] = Field(default_factory=list)
+    configured_filters: List[SubmissionSearchFilterRead] = Field(default_factory=list)
+    warnings: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class SubmissionSearchResultRead(SubmissionRead):
+    """Submission list/search row with the latest verification summary."""
+
+    verification: Optional[VerificationRunSummaryRead] = None

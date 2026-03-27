@@ -87,7 +87,7 @@ Key rules:
 │   │   ├── base.py                # PublicSchemaModel, TenantSchemaModel, AuditBase
 │   │   ├── enums.py               # TemplateType enum
 │   │   ├── public/
-│   │   │   ├── tenant.py          # Tenant (schema_name, is_active)
+│   │   │   ├── tenant.py          # Tenant registry (tenant_key/schema_name, is_active)
 │   │   │   └── baseline_template.py  # Baseline templates, groups, questions, options
 │   │   └── tenant/
 │   │       ├── template.py        # TenantTemplate, TenantTemplateDefinition, QuestionGroup,
@@ -384,7 +384,7 @@ running integration tests. The default disposable test DB is exposed on
 
 | File | Type | Coverage |
 |------|------|----------|
-| `test_tenants.py` | Integration | Tenant CRUD, schema_name validation, header checks |
+| `test_tenants.py` | Integration | Tenant CRUD, tenant_key validation, header checks |
 | `test_baseline_templates.py` | Integration | Baseline lifecycle, groupless questions, immutability |
 | `test_tenant_templates.py` | Integration | Copy mechanics, is_tenant_editable, publish guards |
 | `test_products.py` | Integration | Product lifecycle, KYC config endpoint |
@@ -401,7 +401,7 @@ BASE=http://localhost:7090/api/v1
 # 1. Create a tenant
 TENANT=$(curl -sX POST $BASE/tenants \
   -H "Content-Type: application/json" \
-  -d '{"name": "Acme Bank", "schema_name": "acme_bank"}')
+  -d '{"name": "Acme Bank", "tenant_key": "acme_bank"}')
 TENANT_ID=$(echo $TENANT | jq -r '.id')
 
 # 2. Create a KYC baseline template (admin)

@@ -23,6 +23,9 @@ from app.db.session import tenant_session_for_permissions, tenant_session_for_an
 from app.schemas.submissions import (
     SubmissionStatus,
     SubmissionCreate,
+    SubmissionSearchConfigRead,
+    SubmissionSearchRequest,
+    SubmissionSearchResultRead,
     SubmissionUpdate,
     SubmissionRead,
     SubmissionReadWithHistory,
@@ -112,6 +115,43 @@ async def list_submissions(
         deny = set((columns.get(perm_key, {}) or {}).get("deny", set()) or set())
     for s in items:
         _mask_fields(s, deny=deny)
+    return items
+
+
+@router.get(
+    "/search-config",
+    response_model=SubmissionSearchConfigRead,
+)
+async def get_submission_search_config(
+    session: AsyncSession = Depends(
+        tenant_session_for_any_permissions("submissions.read", "submissions.read_all")
+    ),
+):
+    """Return tenant-discovered submission search filters from active template config."""
+    return await submission_svc.get_submission_search_config(session)
+
+
+@router.post(
+    "/search",
+    response_model=list[SubmissionSearchResultRead],
+)
+async def search_submissions(
+    body: SubmissionSearchRequest,
+    request: Request,
+    session: AsyncSession = Depends(
+        tenant_session_for_any_permissions("submissions.read", "submissions.read_all")
+    ),
+):
+    """Search submissions using native, verification, and tenant-configured filters."""
+    items = await submission_svc.search_submissions(session, body)
+    columns = getattr(request.state, "authz_columns", {})
+    perms = getattr(request.state, "authz_perms", set())
+    perm_key = "submissions.read_all" if "submissions.read_all" in perms else "submissions.read"
+    deny = set()
+    if isinstance(columns, dict):
+        deny = set((columns.get(perm_key, {}) or {}).get("deny", set()) or set())
+    for item in items:
+        _mask_fields(item, deny=deny)
     return items
 
 

@@ -61,6 +61,7 @@ _API_DB_MODULES = {
     "tests/test_tenant_templates.py",
     "tests/test_products.py",
     "tests/test_submissions.py",
+    "tests/test_submission_search.py",
     "tests/test_submission_verifications.py",
 }
 
@@ -189,8 +190,8 @@ async def tenant_client(client: AsyncClient, tenant: dict) -> AsyncClient:
 
 # ── Payload builders (pure helpers, no I/O) ──────────────────────────
 
-def make_tenant_payload(schema_name: str = "test_bank", name: str = "Test Bank") -> dict:
-    return {"name": name, "schema_name": schema_name}
+def make_tenant_payload(tenant_key: str = "test_bank", name: str = "Test Bank") -> dict:
+    return {"name": name, "tenant_key": tenant_key}
 
 
 def make_baseline_payload(

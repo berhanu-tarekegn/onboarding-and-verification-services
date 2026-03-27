@@ -1,0 +1,75 @@
+{
+  "name": "KYB (Business) Standard - Level 3",
+  "description": "Ownership and control baseline with UBO and director identity evidence.",
+  "category": "kyb",
+  "template_type": "kyb",
+  "level": 3,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 3 KYB baseline",
+    "rules_config": {
+      "risk_tier": "ownership_and_control",
+      "verification_methods": [
+        "ubo_kyc",
+        "ownership_validation"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "ubo_information",
+        "title": "Ultimate Beneficial Ownership",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "ubo_list_json",
+            "label": "UBO List",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "format": "json_array",
+              "min_items": 1,
+              "ownership_threshold_percent": 25,
+              "notes": "Current schema has no native array field type; submit UBO objects as JSON text."
+            }
+          },
+          {
+            "unique_key": "shareholding_structure",
+            "label": "Shareholding Structure",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "allowed_extensions": [
+                "pdf",
+                "jpg",
+                "jpeg",
+                "png"
+              ],
+              "notes": "Upload diagram or equivalent ownership structure document."
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "director_identity_documents",
+        "title": "Director Identity Documents",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "director_ids",
+            "label": "Director IDs",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "allow_multiple": true,
+              "notes": "Upload valid ID documents for directors."
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

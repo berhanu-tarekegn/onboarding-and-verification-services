@@ -1,0 +1,22 @@
+name: onboarding-and-verification-saas-test
+
+services:
+  db_test:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_TEST_USER:-onboarding}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:-onboarding}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-onboarding_test_db}
+    ports:
+      - "${DB_TEST_PORT:-5433}:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_TEST_USER:-onboarding} -d ${POSTGRES_TEST_DB:-onboarding_test_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_test_data:

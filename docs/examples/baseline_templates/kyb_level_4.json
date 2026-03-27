@@ -1,0 +1,82 @@
+{
+  "name": "KYB (Business) Standard - Level 4",
+  "description": "High-risk business due diligence baseline with financials and business model evidence.",
+  "category": "kyb",
+  "template_type": "kyb",
+  "level": 4,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 4 KYB baseline",
+    "rules_config": {
+      "risk_tier": "enhanced_kyb",
+      "verification_methods": [
+        "manual_compliance_review",
+        "ongoing_monitoring"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "financial_and_operational_profile",
+        "title": "Financial and Operational Profile",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "source_of_funds_or_revenue",
+            "label": "Source of Funds / Revenue",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "min_length": 10
+            }
+          },
+          {
+            "unique_key": "financial_statements",
+            "label": "Financial Statements",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "allowed_extensions": [
+                "pdf",
+                "jpg",
+                "jpeg",
+                "png"
+              ],
+              "audited_if_possible": true
+            }
+          },
+          {
+            "unique_key": "business_model_description",
+            "label": "Business Model Description",
+            "field_type": "text",
+            "required": true,
+            "display_order": 3,
+            "rules": {
+              "min_length": 20
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "supporting_commercial_documents",
+        "title": "Supporting Commercial Documents",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "contracts_or_invoices",
+            "label": "Contracts / Invoices",
+            "field_type": "fileUpload",
+            "required": false,
+            "display_order": 1,
+            "rules": {
+              "allow_multiple": true,
+              "notes": "Upload supporting commercial evidence."
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

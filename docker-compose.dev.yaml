@@ -1,0 +1,102 @@
+name: onboarding-and-verification-saas-dev
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-onboarding}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-onboarding}
+      POSTGRES_DB: ${POSTGRES_DB:-onboarding_db}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-onboarding} -d ${POSTGRES_DB:-onboarding_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 7090
+    ports:
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-7090}:7090"
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://onboarding:onboarding@db:5432/onboarding_db}
+      DATABASE_URL_DOCKER: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://onboarding:onboarding@db:5432/onboarding_db}
+      APP_NAME: ${APP_NAME:-Onboarding & Verification Service}
+      DEBUG: ${DEBUG:-true}
+      API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      AUTH_TENANT_CLAIM: ${AUTH_TENANT_CLAIM:-tenant_id,{realm}_claims.tenant_id}
+      AUTH_ALGORITHMS: ${AUTH_ALGORITHMS:-RS256}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-account}
+      AUTH_ISSUERS: ${AUTH_ISSUERS:-}
+      AUTH_EXCLUSIVE_ROLE_GROUPS: ${AUTH_EXCLUSIVE_ROLE_GROUPS:-maker|checker}
+
+      KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-}
+      KEYCLOAK_JWKS_URLS: ${KEYCLOAK_JWKS_URLS:-}
+      KEYCLOAK_JWKS_JSON: ${KEYCLOAK_JWKS_JSON:-}
+      KEYCLOAK_TRUSTED_ISSUER_BASES: ${KEYCLOAK_TRUSTED_ISSUER_BASES:-}
+      JWKS_REFRESH_SECONDS: ${JWKS_REFRESH_SECONDS:-86400}
+      JWKS_REQUIRED: ${JWKS_REQUIRED:-true}
+      JWKS_FETCH_HEADERS_JSON: ${JWKS_FETCH_HEADERS_JSON:-}
+      JWKS_FETCH_TIMEOUT_SECONDS: ${JWKS_FETCH_TIMEOUT_SECONDS:-10}
+
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-localhost:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-onboarding-task-queue}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_REQUIRED: ${TEMPORAL_REQUIRED:-false}
+
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      KEYCLOAK_CLIENTS_JSON: ${KEYCLOAK_CLIENTS_JSON:-}
+      KEYCLOAK_REALMS: ${KEYCLOAK_REALMS:-}
+      KEYCLOAK_HTTP_HEADERS_JSON: ${KEYCLOAK_HTTP_HEADERS_JSON:-}
+      KEYCLOAK_HTTP_TIMEOUT_SECONDS: ${KEYCLOAK_HTTP_TIMEOUT_SECONDS:-10}
+      KEYCLOAK_REALM_DISCOVERY_TTL_SECONDS: ${KEYCLOAK_REALM_DISCOVERY_TTL_SECONDS:-3600}
+
+      KEYCLOAK_PROVISIONING_ENABLED: ${KEYCLOAK_PROVISIONING_ENABLED:-true}
+      KEYCLOAK_PROVISIONING_REQUIRED: ${KEYCLOAK_PROVISIONING_REQUIRED:-true}
+      KEYCLOAK_ADMIN_BASE_URL: ${KEYCLOAK_ADMIN_BASE_URL:-}
+      KEYCLOAK_ADMIN_REALM: ${KEYCLOAK_ADMIN_REALM:-master}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-oaas-provisioner}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      KEYCLOAK_TENANT_CLIENT_ID: ${KEYCLOAK_TENANT_CLIENT_ID:-oaas-client}
+      KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL: ${KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL:-true}
+      KEYCLOAK_BOOTSTRAP_PASSWORD: ${KEYCLOAK_BOOTSTRAP_PASSWORD:-}
+      KEYCLOAK_BOOTSTRAP_USERS_JSON: ${KEYCLOAK_BOOTSTRAP_USERS_JSON:-}
+      KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN: ${KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN:-example.com}
+
+      AUTHZ_CACHE_TTL_SECONDS: ${AUTHZ_CACHE_TTL_SECONDS:-30}
+      PLATFORM_PROVISIONING_API_KEY: ${PLATFORM_PROVISIONING_API_KEY:-}
+      USER_MANAGEMENT_SERVICE_ENABLED: ${USER_MANAGEMENT_SERVICE_ENABLED:-false}
+      USER_MANAGEMENT_SERVICE_URL: ${USER_MANAGEMENT_SERVICE_URL:-}
+      USER_MANAGEMENT_USER_PATH: ${USER_MANAGEMENT_USER_PATH:-users}
+      USER_MANAGEMENT_TIMEOUT_SECONDS: ${USER_MANAGEMENT_TIMEOUT_SECONDS:-10}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:7090/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data_dev:

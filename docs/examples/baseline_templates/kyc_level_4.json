@@ -1,0 +1,81 @@
+{
+  "name": "KYC (Individual) Standard - Level 4",
+  "description": "High-risk individual due diligence baseline with wealth and financial evidence.",
+  "category": "kyc",
+  "template_type": "kyc",
+  "level": 4,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 4 KYC baseline",
+    "rules_config": {
+      "risk_tier": "high_risk",
+      "verification_methods": [
+        "manual_compliance_review"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "wealth_and_financials",
+        "title": "Wealth and Financials",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "source_of_wealth",
+            "label": "Source of Wealth",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "min_length": 20
+            }
+          },
+          {
+            "unique_key": "financial_history",
+            "label": "Financial History",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "allowed_extensions": [
+                "pdf",
+                "jpg",
+                "jpeg",
+                "png"
+              ],
+              "notes": "Bank statements or equivalent financial records."
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "account_purpose_and_supporting_documents",
+        "title": "Account Purpose and Supporting Documents",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "purpose_of_account",
+            "label": "Purpose of Account",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "min_length": 10
+            }
+          },
+          {
+            "unique_key": "additional_documents",
+            "label": "Additional Documents",
+            "field_type": "fileUpload",
+            "required": false,
+            "display_order": 2,
+            "rules": {
+              "allow_multiple": true,
+              "notes": "Upload additional documents required by compliance."
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

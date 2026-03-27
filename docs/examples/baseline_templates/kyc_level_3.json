@@ -1,0 +1,108 @@
+{
+  "name": "KYC (Individual) Standard - Level 3",
+  "description": "Enhanced due diligence KYC baseline with source-of-funds and address evidence.",
+  "category": "kyc",
+  "template_type": "kyc",
+  "level": 3,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 3 KYC baseline",
+    "rules_config": {
+      "risk_tier": "enhanced_due_diligence",
+      "verification_methods": [
+        "document_authenticity_checks",
+        "face_match",
+        "proof_of_address_review"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "address_evidence",
+        "title": "Address Evidence",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "proof_of_address",
+            "label": "Proof of Address",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "document_age_max_months": 3,
+              "allowed_extensions": [
+                "jpg",
+                "jpeg",
+                "png",
+                "pdf"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "employment_and_funds",
+        "title": "Employment and Source of Funds",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "occupation",
+            "label": "Occupation",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "min_length": 2,
+              "max_length": 100
+            }
+          },
+          {
+            "unique_key": "employer_name",
+            "label": "Employer Name",
+            "field_type": "text",
+            "required": false,
+            "display_order": 2,
+            "rules": {
+              "required_if_employed": true
+            }
+          },
+          {
+            "unique_key": "source_of_funds",
+            "label": "Source of Funds",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 3,
+            "options": [
+              {
+                "value": "salary",
+                "display_order": 1
+              },
+              {
+                "value": "business",
+                "display_order": 2
+              },
+              {
+                "value": "investment",
+                "display_order": 3
+              },
+              {
+                "value": "other",
+                "display_order": 4
+              }
+            ]
+          },
+          {
+            "unique_key": "tax_id",
+            "label": "Tax ID",
+            "field_type": "text",
+            "required": false,
+            "display_order": 4,
+            "rules": {
+              "validation_profile": "country_specific_tax_id"
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

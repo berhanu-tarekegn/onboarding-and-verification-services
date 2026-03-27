@@ -1,0 +1,114 @@
+{
+  "name": "KYC (Individual) Standard - Level 1",
+  "description": "Basic KYC baseline for low-risk individual onboarding.",
+  "category": "kyc",
+  "template_type": "kyc",
+  "level": 1,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 1 KYC baseline",
+    "rules_config": {
+      "risk_tier": "low",
+      "verification_methods": [
+        "otp_phone",
+        "otp_email"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "personal_information",
+        "title": "Personal Information",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "full_name",
+            "label": "Full Name",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "regex": "^[A-Za-z]+(?:[ '-][A-Za-z]+)+$",
+            "rules": {
+              "min_length": 2,
+              "max_length": 100,
+              "min_words": 2
+            }
+          },
+          {
+            "unique_key": "date_of_birth",
+            "label": "Date of Birth",
+            "field_type": "date",
+            "required": true,
+            "display_order": 2,
+            "min_date": "1900-01-01",
+            "rules": {
+              "minimum_age_years": 18
+            }
+          },
+          {
+            "unique_key": "nationality",
+            "label": "Nationality",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 3,
+            "rules": {
+              "options_source": "iso_country_nationalities"
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "contact_information",
+        "title": "Contact Information",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "phone_number",
+            "label": "Phone Number",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "keyboard_type": "phone",
+            "regex": "^\\+?[1-9]\\d{7,14}$"
+          },
+          {
+            "unique_key": "email_address",
+            "label": "Email",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2,
+            "keyboard_type": "email",
+            "regex": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+          }
+        ]
+      },
+      {
+        "unique_key": "residency_information",
+        "title": "Residency Information",
+        "display_order": 3,
+        "questions": [
+          {
+            "unique_key": "country_of_residence",
+            "label": "Country of Residence",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "options_source": "iso_countries"
+            }
+          },
+          {
+            "unique_key": "self_declared_address",
+            "label": "Self-declared Address",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "min_length": 4
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

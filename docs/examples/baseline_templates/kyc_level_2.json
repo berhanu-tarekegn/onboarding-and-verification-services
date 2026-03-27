@@ -1,0 +1,175 @@
+{
+  "name": "KYC (Individual) Standard - Level 2",
+  "description": "Standard verification KYC baseline with ID collection and selfie checks.",
+  "category": "kyc",
+  "template_type": "kyc",
+  "level": 2,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 2 KYC baseline",
+    "rules_config": {
+      "risk_tier": "standard",
+      "verification_methods": [
+        "id_upload_ocr",
+        "document_validation",
+        "selfie_liveness"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "identity_documents",
+        "title": "Identity Documents",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "government_id_type",
+            "label": "Government ID Type",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 1,
+            "options": [
+              {
+                "value": "passport",
+                "display_order": 1
+              },
+              {
+                "value": "national_id",
+                "display_order": 2
+              },
+              {
+                "value": "drivers_license",
+                "display_order": 3
+              }
+            ]
+          },
+          {
+            "unique_key": "id_number",
+            "label": "ID Number",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "validation_profile": "country_specific_id_number"
+            }
+          },
+          {
+            "unique_key": "id_expiry_date",
+            "label": "ID Expiry Date",
+            "field_type": "date",
+            "required": true,
+            "display_order": 3,
+            "rules": {
+              "must_be_future_date": true
+            }
+          },
+          {
+            "unique_key": "id_front_image",
+            "label": "ID Front Image",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 4,
+            "rules": {
+              "allowed_extensions": [
+                "jpg",
+                "jpeg",
+                "png",
+                "pdf"
+              ],
+              "max_file_size_mb": 5
+            }
+          },
+          {
+            "unique_key": "id_back_image",
+            "label": "ID Back Image",
+            "field_type": "fileUpload",
+            "required": false,
+            "display_order": 5,
+            "rules": {
+              "allowed_extensions": [
+                "jpg",
+                "jpeg",
+                "png",
+                "pdf"
+              ],
+              "max_file_size_mb": 5,
+              "required_if_applicable": true
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "structured_address",
+        "title": "Structured Address",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "address_line_1",
+            "label": "Address Line 1",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "min_length": 4
+            }
+          },
+          {
+            "unique_key": "city",
+            "label": "City",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2
+          },
+          {
+            "unique_key": "state_or_region",
+            "label": "State or Region",
+            "field_type": "text",
+            "required": false,
+            "display_order": 3
+          },
+          {
+            "unique_key": "postal_code",
+            "label": "Postal Code",
+            "field_type": "text",
+            "required": false,
+            "display_order": 4
+          },
+          {
+            "unique_key": "address_country",
+            "label": "Country",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 5,
+            "rules": {
+              "options_source": "iso_countries"
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "biometric_verification",
+        "title": "Biometric Verification",
+        "display_order": 3,
+        "questions": [
+          {
+            "unique_key": "selfie_image",
+            "label": "Selfie Image",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "allowed_extensions": [
+                "jpg",
+                "jpeg",
+                "png",
+                "pdf"
+              ],
+              "face_visible": true,
+              "liveness_required": true
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

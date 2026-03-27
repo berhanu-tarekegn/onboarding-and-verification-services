@@ -1,0 +1,31 @@
+_format_version: "3.0"
+_transform: true
+
+# Example Kong declarative config for the auth proxy endpoints.
+#
+# Goal:
+#   POST /api/auth/login/<realm>
+#   POST /api/auth/refresh/<realm>
+# forwarded to this FastAPI service, which then forwards to Keycloak.
+#
+# Notes:
+# - Keep these routes unauthenticated at Kong; FastAPI will validate credentials
+#   against Keycloak and return tokens.
+# - Add rate-limiting, bot protection, and allowlists as appropriate.
+
+services:
+  - name: oaas-template-service
+    # Replace with your upstream (container DNS or internal LB).
+    url: http://template-service:7090
+    routes:
+      - name: auth-login
+        paths:
+          - /api/auth/login
+        strip_path: false
+        methods: [POST]
+      - name: auth-refresh
+        paths:
+          - /api/auth/refresh
+        strip_path: false
+        methods: [POST]
+

@@ -1,0 +1,117 @@
+{
+  "name": "KYB (Business) Standard - Level 2",
+  "description": "Standard business verification baseline with registration evidence and director details.",
+  "category": "kyb",
+  "template_type": "kyb",
+  "level": 2,
+  "initial_version": {
+    "version_tag": "1.0.0",
+    "changelog": "Initial Level 2 KYB baseline",
+    "rules_config": {
+      "risk_tier": "standard_business_verification",
+      "verification_methods": [
+        "document_validation",
+        "registry_cross_check"
+      ]
+    },
+    "question_groups": [
+      {
+        "unique_key": "business_documents",
+        "title": "Business Documents",
+        "display_order": 1,
+        "questions": [
+          {
+            "unique_key": "certificate_of_incorporation",
+            "label": "Certificate of Incorporation",
+            "field_type": "fileUpload",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "allowed_extensions": [
+                "pdf",
+                "jpg",
+                "jpeg",
+                "png"
+              ]
+            }
+          },
+          {
+            "unique_key": "tax_identification_number",
+            "label": "Tax Identification Number (TIN)",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2,
+            "rules": {
+              "validation_profile": "country_specific_tin"
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "registered_address",
+        "title": "Registered Address",
+        "display_order": 2,
+        "questions": [
+          {
+            "unique_key": "registered_address_line_1",
+            "label": "Registered Address Line 1",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1
+          },
+          {
+            "unique_key": "registered_city",
+            "label": "City",
+            "field_type": "text",
+            "required": true,
+            "display_order": 2
+          },
+          {
+            "unique_key": "registered_state_or_region",
+            "label": "State or Region",
+            "field_type": "text",
+            "required": false,
+            "display_order": 3
+          },
+          {
+            "unique_key": "registered_postal_code",
+            "label": "Postal Code",
+            "field_type": "text",
+            "required": false,
+            "display_order": 4
+          },
+          {
+            "unique_key": "registered_country",
+            "label": "Country",
+            "field_type": "dropdown",
+            "required": true,
+            "display_order": 5,
+            "rules": {
+              "options_source": "iso_countries"
+            }
+          }
+        ]
+      },
+      {
+        "unique_key": "directors_information",
+        "title": "Directors Information",
+        "display_order": 3,
+        "questions": [
+          {
+            "unique_key": "directors_list_json",
+            "label": "Directors List",
+            "field_type": "text",
+            "required": true,
+            "display_order": 1,
+            "rules": {
+              "format": "json_array",
+              "min_items": 1,
+              "notes": "Current schema has no native array field type; submit director objects as JSON text."
+            }
+          }
+        ]
+      }
+    ],
+    "questions": []
+  }
+}

@@ -48,9 +48,8 @@ PLATFORM_INITIALIZATION_API_KEY=
 
 Notes:
 
-- The app accepts both the new env names and the legacy provisioning env names.
 - `KEYCLOAK_CLIENTS_JSON` is only needed for the platform admin realm. Tenant realm client credentials are stored on the tenant row after tenant initialization.
-- If you set `PLATFORM_INITIALIZATION_API_KEY`, the API accepts either `X-Initialization-Key` or legacy `X-Provisioning-Key`.
+- If you set `PLATFORM_INITIALIZATION_API_KEY`, platform initialization routes require `X-Initialization-Key`.
 
 ## Local Keycloak `.env`
 
@@ -116,12 +115,17 @@ In the `master` realm:
 ## Run O&V
 
 ```bash
-cp .env.example .env
 uv sync
-docker compose -f docker-compose.dev.yaml up db -d
+docker compose -f docker-compose.dev.yaml up db temporal temporal-ui -d
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 7090
+uv run python -m app.temporal.worker
 ```
+
+Temporal URLs:
+
+- gRPC: `127.0.0.1:7233`
+- UI: [http://127.0.0.1:8233](http://127.0.0.1:8233)
 
 ## Tenant Initialization Demo Request
 

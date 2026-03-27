@@ -7,17 +7,26 @@ engines cleanly.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from copy import deepcopy
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from time import monotonic
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.config import get_settings
+from app.core.context import get_current_tenant
+from app.db.session import async_session_factory, get_schema_name_for_tenant
+from app.models.public.tenant import Tenant
 from app.models.tenant.submission import Submission
 from app.models.tenant.verification import VerificationRun, VerificationStepRun
 from app.schemas.submissions.verification import (
@@ -28,10 +37,17 @@ from app.schemas.submissions.verification import (
     VerificationStepSummaryRead,
     VerificationStepRunRead,
 )
+from app.temporal.client import get_or_connect_temporal_client
+from app.temporal.models.verification import (
+    VerificationWorkflowAction,
+    VerificationWorkflowInput,
+    VerificationWorkflowState,
+)
 from app.services import tenant_templates as tenant_template_svc
 
 RUN_TERMINAL_STATUSES = {"completed", "failed", "manual_review", "cancelled", "expired"}
 STEP_TERMINAL_STATUSES = {"completed", "failed", "skipped", "expired"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,17 @@ async def start_verification(
         await session.refresh(run)
         return await _serialize_run(run, session)
 
+    tenant_key = await _resolve_current_tenant_key()
+    previous_status = run.status
+    previous_step = run.current_step_key
+    if await _dispatch_temporal_resume(run, tenant_key=tenant_key, session=session):
+        return await _wait_for_run_update(
+            run.id,
+            session,
+            previous_status=previous_status,
+            previous_step_key=previous_step,
+        )
+
     await _advance_run(run, ctx, session)
     return await _serialize_run(run, session)
 
@@ -148,6 +175,23 @@ async def submit_step_action(
         raise _unprocessable(
             f"Verification step '{step_key}' is not waiting for user action.",
             code="verification_step_not_waiting",
+        )
+
+    tenant_key = await _resolve_current_tenant_key()
+    previous_status = run.status
+    previous_step = run.current_step_key
+    if await _dispatch_temporal_action(
+        run,
+        tenant_key=tenant_key,
+        step_key=step_key,
+        body=body,
+        session=session,
+    ):
+        return await _wait_for_run_update(
+            run.id,
+            session,
+            previous_status=previous_status,
+            previous_step_key=previous_step,
         )
 
     await _apply_user_action(run, step, ctx.flow_config, body)
@@ -179,6 +223,7 @@ def build_verification_summary(
         decision=run.decision,
         kyc_level=run.kyc_level,
         current_step_key=run.current_step_key,
+        workflow_id=run.workflow_id,
         started_at=run.started_at,
         completed_at=run.completed_at,
         deferred_until=run.deferred_until,
@@ -249,6 +294,11 @@ async def _get_latest_run(submission_id: UUID, session: AsyncSession) -> Verific
         .where(VerificationRun.submission_id == submission_id)
         .order_by(VerificationRun.created_at.desc())
     )
+    return result.first()
+
+
+async def _get_run_by_id(run_id: UUID, session: AsyncSession) -> VerificationRun | None:
+    result = await session.exec(select(VerificationRun).where(VerificationRun.id == run_id))
     return result.first()
 
 
@@ -836,6 +886,8 @@ async def _serialize_run(run: VerificationRun, session: AsyncSession) -> Verific
         decision=run.decision,
         kyc_level=run.kyc_level,
         current_step_key=run.current_step_key,
+        workflow_id=run.workflow_id,
+        workflow_run_id=run.workflow_run_id,
         is_active=run.is_active,
         rules_snapshot=deepcopy(run.rules_snapshot or {}),
         facts_snapshot=deepcopy(run.facts_snapshot or {}),
@@ -869,3 +921,203 @@ async def _serialize_run(run: VerificationRun, session: AsyncSession) -> Verific
             for step in steps
         ],
     )
+
+
+async def _resolve_current_tenant_key() -> str:
+    tenant_identifier = (get_current_tenant() or "").strip()
+    if not tenant_identifier:
+        raise _unprocessable("Tenant context is missing.", code="tenant_context_missing")
+
+    async with async_session_factory() as session:
+        await session.execute(text("SET search_path TO public"))
+        try:
+            tenant_uuid = UUID(tenant_identifier)
+            stmt = select(Tenant).where(Tenant.id == tenant_uuid)
+        except ValueError:
+            stmt = select(Tenant).where((Tenant.tenant_key == tenant_identifier) | (Tenant.keycloak_realm == tenant_identifier))
+
+        result = await session.execute(stmt)
+        tenant = result.scalars().first()
+        if tenant is None:
+            raise _not_found("Tenant not found.", code="tenant_not_found")
+        return tenant.tenant_key
+
+
+def _workflow_id_for_run(run: VerificationRun) -> str:
+    return f"submission-verification-{run.id}"
+
+
+async def _dispatch_temporal_resume(
+    run: VerificationRun,
+    *,
+    tenant_key: str,
+    session: AsyncSession,
+) -> bool:
+    settings = get_settings()
+    if not settings.TEMPORAL_ENABLED:
+        return False
+
+    try:
+        client = await get_or_connect_temporal_client()
+    except Exception as exc:  # noqa: BLE001
+        if settings.TEMPORAL_REQUIRED:
+            raise
+        logger.warning("Temporal unavailable for verification run %s: %s", run.id, exc)
+        return False
+
+    if not run.workflow_id:
+        workflow_id = _workflow_id_for_run(run)
+        from temporalio.client import WorkflowAlreadyStartedError
+        from app.temporal.workflows.verification import SubmissionVerificationWorkflow
+
+        try:
+            handle = await client.start_workflow(
+                SubmissionVerificationWorkflow.run,
+                VerificationWorkflowInput(run_id=str(run.id), tenant_key=tenant_key),
+                id=workflow_id,
+                task_queue=settings.TEMPORAL_TASK_QUEUE,
+            )
+        except WorkflowAlreadyStartedError:
+            handle = client.get_workflow_handle(workflow_id)
+
+        run.workflow_id = workflow_id
+        run.workflow_run_id = getattr(handle, "first_execution_run_id", None) or run.workflow_run_id
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+    else:
+        handle = client.get_workflow_handle(run.workflow_id)
+
+    await handle.signal("resume")
+    return True
+
+
+async def _dispatch_temporal_action(
+    run: VerificationRun,
+    *,
+    tenant_key: str,
+    step_key: str,
+    body: VerificationActionRequest,
+    session: AsyncSession,
+) -> bool:
+    if not await _dispatch_temporal_resume(run, tenant_key=tenant_key, session=session):
+        return False
+
+    client = await get_or_connect_temporal_client()
+    handle = client.get_workflow_handle(run.workflow_id)
+    await handle.signal(
+        "submit_action",
+        VerificationWorkflowAction(step_key=step_key, action=body.action, payload=deepcopy(body.payload)),
+    )
+    return True
+
+
+async def _wait_for_run_update(
+    run_id: UUID,
+    session: AsyncSession,
+    *,
+    previous_status: str | None,
+    previous_step_key: str | None,
+    timeout_seconds: float = 5.0,
+) -> VerificationRunRead:
+    deadline = monotonic() + timeout_seconds
+    latest: VerificationRun | None = None
+
+    while monotonic() < deadline:
+        session.expire_all()
+        latest = await _get_run_by_id(run_id, session)
+        if latest is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+        if (
+            latest.status != previous_status
+            or latest.current_step_key != previous_step_key
+            or not latest.is_active
+        ):
+            return await _serialize_run(latest, session)
+        await asyncio.sleep(0.2)
+
+    if latest is None:
+        latest = await _get_run_by_id(run_id, session)
+        if latest is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+    return await _serialize_run(latest, session)
+
+
+@asynccontextmanager
+async def _tenant_runtime_session(tenant_key: str):
+    async with async_session_factory() as session:
+        tenant_schema = await get_schema_name_for_tenant(tenant_key)
+        await session.execute(text(f"SET search_path TO {tenant_schema}, public"))
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+
+
+def _run_state(run: VerificationRun) -> VerificationWorkflowState:
+    return VerificationWorkflowState(
+        run_id=str(run.id),
+        status=run.status,
+        current_step_key=run.current_step_key,
+        decision=run.decision,
+        kyc_level=run.kyc_level,
+        is_active=run.is_active,
+    )
+
+
+async def advance_verification_run_in_tenant(
+    *,
+    run_id: str,
+    tenant_key: str,
+) -> VerificationWorkflowState:
+    async with _tenant_runtime_session(tenant_key) as session:
+        run_uuid = UUID(run_id)
+        run = await _get_run_by_id(run_uuid, session)
+        if run is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+        ctx = await _load_flow_context(run.submission_id, session, flow_key=run.flow_key)
+        await _advance_run(run, ctx, session)
+        session.expire_all()
+        refreshed = await _get_run_by_id(run_uuid, session)
+        if refreshed is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+        return _run_state(refreshed)
+
+
+async def apply_verification_action_in_tenant(
+    *,
+    run_id: str,
+    tenant_key: str,
+    step_key: str,
+    action: str,
+    payload: dict[str, Any],
+) -> VerificationWorkflowState:
+    async with _tenant_runtime_session(tenant_key) as session:
+        run_uuid = UUID(run_id)
+        run = await _get_run_by_id(run_uuid, session)
+        if run is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+        ctx = await _load_flow_context(run.submission_id, session, flow_key=run.flow_key)
+        step = await _get_step_run(run.id, step_key, session)
+        if step is None:
+            raise _not_found(f"Verification step '{step_key}' not found.", code="verification_step_not_found")
+        if step.status != "waiting_user_action":
+            raise _unprocessable(
+                f"Verification step '{step_key}' is not waiting for user action.",
+                code="verification_step_not_waiting",
+            )
+
+        await _apply_user_action(
+            run,
+            step,
+            ctx.flow_config,
+            VerificationActionRequest(action=action or "submit_code", payload=deepcopy(payload)),
+        )
+        session.add(step)
+        await session.commit()
+        session.expire_all()
+        refreshed = await _get_run_by_id(run_uuid, session)
+        if refreshed is None:
+            raise _not_found("Verification run not found.", code="verification_run_not_found")
+        return _run_state(refreshed)

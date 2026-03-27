@@ -19,11 +19,11 @@ This repo currently supports end-to-end simulation for:
 - tenant user setup in Keycloak
 - tenant and global authz policy management
 - submission CRUD and workflow
-- verification flow execution
+- verification flow execution through Temporal
 - submission search and partner-facing read APIs
 - transform rule CRUD and migration preview/apply
 
-Temporal is present in the repo but not wired into the live request path yet, so it is not required for this demo.
+Temporal is now part of the verification execution path for this demo.
 
 ## 2. Prerequisites
 
@@ -44,20 +44,16 @@ Minimum required:
 
 - PostgreSQL
 - Keycloak
+- Temporal server
+- Temporal worker
 - this API
-
-Optional:
-
-- Temporal server and worker
-
-For the current app behavior, Temporal can be skipped.
 
 ## 4. Start PostgreSQL
 
 From the repo root:
 
 ```bash
-docker compose -f docker-compose.dev.yaml up db -d
+docker compose -f docker-compose.dev.yaml up db temporal temporal-ui -d
 ```
 
 ## 5. Start Keycloak
@@ -109,14 +105,19 @@ KEYCLOAK_ADMIN_CLIENT_SECRET=REPLACE_ME
 KEYCLOAK_TENANT_CLIENT_ID=oaas-client
 KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL=true
 
-KEYCLOAK_CLIENTS_JSON={"master":{"client_id":"oaas-admin-ui", "client_secret":"t6qj7LALRDf0n4wYcy2HwUsKDxR6AFHBey3S7umpuA+reuNQlSGdHDZ6vNp0ZMPQ"}}
+KEYCLOAK_CLIENTS_JSON={"master":{"client_id":"oaas-admin-ui","client_secret":"change-me-admin-ui-secret"}}
 
 KEYCLOAK_BOOTSTRAP_USERS_JSON=[{"username":"{realm}_tenant_admin","roles":["tenant_admin"]},{"username":"{realm}_maker","roles":["maker"]},{"username":"{realm}_checker","roles":["checker"]}]
 KEYCLOAK_BOOTSTRAP_PASSWORD=ChangeMe123!
 KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN=example.com
 
 PLATFORM_INITIALIZATION_API_KEY=
+TEMPORAL_HOST=127.0.0.1:7233
+TEMPORAL_HOST_DOCKER=temporal:7233
+TEMPORAL_NAMESPACE=default
+TEMPORAL_TASK_QUEUE=onboarding-task-queue
 TEMPORAL_ENABLED=true
+TEMPORAL_REQUIRED=false
 ```
 
 Important:
@@ -137,11 +138,23 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 7090
 ```
 
+Start the Temporal worker in a second terminal:
+
+```bash
+uv run python -m app.temporal.worker
+```
+
 Smoke test:
 
 ```bash
 curl -sS http://127.0.0.1:7090/health
 curl -sS http://127.0.0.1:7090/docs
+```
+
+Optional Temporal UI:
+
+```bash
+open http://127.0.0.1:8233
 ```
 
 ## 9. Demo Shell Variables
@@ -635,6 +648,13 @@ curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/verification" \
   -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID"
 ```
+
+Expected behavior:
+
+- the start call creates or resumes a Temporal workflow for the verification run
+- the first response should include `workflow_id`
+- the run moves to `waiting_user_action` while OTP input is outstanding
+- each action call signals the same workflow instead of re-running the full flow inline in the API process
 
 ## 20. Submission Search for Portal and Partners
 

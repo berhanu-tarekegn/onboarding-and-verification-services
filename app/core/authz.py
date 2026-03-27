@@ -571,9 +571,9 @@ def require_permission(*required_perms: str):
             from sqlmodel import select
             from app.models.public.tenant import Tenant
 
-            # ctx.tenant_id is realm/platform id (schema_name)
+            # ctx.tenant_id is realm/platform id (tenant_key)
             r = await session.execute(
-                select(Tenant).where((Tenant.schema_name == ctx.tenant_id) | (Tenant.keycloak_realm == ctx.tenant_id))
+                select(Tenant).where((Tenant.tenant_key == ctx.tenant_id) | (Tenant.keycloak_realm == ctx.tenant_id))
             )
             t = r.scalars().first()
             if t is not None:
@@ -628,7 +628,7 @@ def require_any_permission(*any_perms: str):
             from app.models.public.tenant import Tenant
 
             r = await session.execute(
-                select(Tenant).where((Tenant.schema_name == ctx.tenant_id) | (Tenant.keycloak_realm == ctx.tenant_id))
+                select(Tenant).where((Tenant.tenant_key == ctx.tenant_id) | (Tenant.keycloak_realm == ctx.tenant_id))
             )
             t = r.scalars().first()
             if t is not None:

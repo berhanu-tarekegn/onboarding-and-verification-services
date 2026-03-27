@@ -27,20 +27,19 @@ Authorization is a second layer on top of auth. Static role-to-permission defaul
 It also supports field-level column rules. `/api/auth/me` in [routes.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/routes/auth/routes.py#L555) is basically the best introspection endpoint for this whole stack because it shows the resolved tenant, roles, permissions, and active policies.
 
 **Temporal**
-Temporal exists, but it is mostly scaffolding right now.
+Temporal is now part of the verification execution path.
 
-- Config is defined in [config.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/core/config.py#L27).
-- There is a client singleton in [client.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/client.py#L23).
-- There is a standalone worker process in [worker.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/worker.py#L27).
-- There is one workflow, [onboarding.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/workflows/onboarding.py#L19), and one placeholder activity, [onboarding.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/activities/onboarding.py#L12).
+- Config and startup connection are in [config.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/core/config.py#L27) and [main.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/main.py#L48).
+- The worker registers the live verification workflow in [worker.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/worker.py#L18).
+- The workflow and activities are in [verification.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/workflows/verification.py) and [verification.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/temporal/activities/verification.py).
+- Submission verification start/action routes dispatch or signal the workflow through [service.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/services/verifications/service.py).
 
-But it is not wired into the live FastAPI request path yet:
-- the startup connection is commented out in [main.py](/Users/berhanu.tarekegn/git/onboarding-and-verification/app/main.py#L57)
-- I could not find any route or service calling `get_temporal_client()` or `start_workflow()`
+The runtime shape is:
 
-So the current state is: Temporal support is prepared, but onboarding workflows are not actually started by the API yet. The workflow itself is still a placeholder that just executes `greet_user`.
+1. `POST /api/v1/submissions/{id}/verification/start` creates or resumes the run.
+2. The API starts `SubmissionVerificationWorkflow` for that run.
+3. Temporal activities advance the run inside a tenant-scoped DB session.
+4. OTP submission routes signal the workflow with step actions.
+5. The workflow advances again until it waits for the next input or reaches a terminal decision.
 
-If you want, I can do a second pass that traces one concrete flow end-to-end:
-1. tenant creation and Keycloak provisioning,
-2. login to protected API request,
-3. where Temporal would plug into submissions/onboarding once implemented.
+The older placeholder onboarding workflow still exists, but the end-to-end verification path now uses Temporal directly.

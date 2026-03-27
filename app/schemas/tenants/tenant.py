@@ -79,7 +79,7 @@ class TenantRead(TenantBase):
         return cls(
             id=tenant.id,
             name=tenant.name,
-            tenant_key=tenant.schema_name,
+            tenant_key=tenant.tenant_key,
             is_active=tenant.is_active,
             keycloak_client_id=tenant.keycloak_client_id,
             created_at=tenant.created_at,

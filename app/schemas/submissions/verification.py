@@ -73,6 +73,7 @@ class VerificationRunSummaryRead(SQLModel):
     decision: Optional[str] = None
     kyc_level: Optional[str] = None
     current_step_key: Optional[str] = None
+    workflow_id: Optional[str] = None
     started_at: datetime
     completed_at: Optional[datetime] = None
     deferred_until: Optional[datetime] = None
@@ -91,6 +92,8 @@ class VerificationRunRead(SQLModel):
     decision: Optional[str] = None
     kyc_level: Optional[str] = None
     current_step_key: Optional[str] = None
+    workflow_id: Optional[str] = None
+    workflow_run_id: Optional[str] = None
     is_active: bool
     rules_snapshot: Dict[str, Any] = Field(default_factory=dict)
     facts_snapshot: Dict[str, Any] = Field(default_factory=dict)

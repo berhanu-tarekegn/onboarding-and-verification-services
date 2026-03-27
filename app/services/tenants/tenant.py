@@ -7,7 +7,6 @@ Each tenant gets:
 - An optional Keycloak realm/client when tenant initialization is enabled
 
 The tenant UUID (id) is used as the X-Tenant-ID header value.
-Internally, the persisted ``schema_name`` field stores the external ``tenant_key``.
 """
 
 import json
@@ -51,7 +50,7 @@ async def create_tenant(
     """
     tenant = Tenant(
         name=data.name,
-        schema_name=data.tenant_key,
+        tenant_key=data.tenant_key,
         keycloak_realm=data.tenant_key,
     )
     session.add(tenant)
@@ -87,7 +86,7 @@ async def create_tenant(
 
     try:
         await provision_tenant_schema(
-            tenant_schema_name=tenant.schema_name,
+            tenant_schema_name=tenant.tenant_key,
             engine=engine,
             database_url=database_url,
         )
@@ -95,7 +94,7 @@ async def create_tenant(
         # Avoid leaving partially created tenants around (confusing retries).
         # Best-effort cleanup: drop schema and delete tenant row.
         try:
-            await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+            await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -128,7 +127,7 @@ async def create_tenant(
     settings = get_settings()
     if settings.KEYCLOAK_PROVISIONING_ENABLED:
         try:
-            realm = tenant.keycloak_realm or tenant.schema_name
+            realm = tenant.keycloak_realm or tenant.tenant_key
             realm_created = await ensure_realm(realm)
             await ensure_roles(
                 realm,
@@ -173,7 +172,7 @@ async def create_tenant(
                 except Exception:  # noqa: BLE001
                     await session.rollback()
                 try:
-                    await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+                    await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
                 except Exception:  # noqa: BLE001
                     pass
                 try:
@@ -198,7 +197,7 @@ async def create_tenant(
 
             logging.getLogger(__name__).warning(
                 "Keycloak tenant initialization failed for tenant %s: %s",
-                tenant.schema_name,
+                tenant.tenant_key,
                 exc,
             )
 
@@ -232,7 +231,7 @@ async def get_tenant(tenant_id: UUID, session: AsyncSession) -> Tenant:
 async def get_tenant_by_key(tenant_key: str, session: AsyncSession) -> Optional[Tenant]:
     """Return a tenant by tenant key or Keycloak realm."""
     result = await session.execute(
-        select(Tenant).where((Tenant.schema_name == tenant_key) | (Tenant.keycloak_realm == tenant_key))
+        select(Tenant).where((Tenant.tenant_key == tenant_key) | (Tenant.keycloak_realm == tenant_key))
     )
     return result.scalars().first()
 
@@ -284,7 +283,7 @@ async def delete_tenant(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Engine required for hard delete.",
             )
-        await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+        await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
         await session.delete(tenant)
         await session.commit()
         return tenant
@@ -403,7 +402,7 @@ async def create_tenant_user(
         )
 
     tenant = await get_tenant(tenant_id, session)
-    realm = (tenant.keycloak_realm or tenant.schema_name or "").strip()
+    realm = (tenant.keycloak_realm or tenant.tenant_key or "").strip()
     if not realm:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -19,7 +19,12 @@ from temporalio.worker import Worker
 
 from app.core.config import get_settings
 from app.temporal.activities.onboarding import greet_user
+from app.temporal.activities.verification import (
+    advance_verification_run_activity,
+    apply_verification_action_activity,
+)
 from app.temporal.workflows.onboarding import OnboardingWorkflow
+from app.temporal.workflows.verification import SubmissionVerificationWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +46,8 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=settings.TEMPORAL_TASK_QUEUE,
-        workflows=[OnboardingWorkflow],
-        activities=[greet_user],
+        workflows=[OnboardingWorkflow, SubmissionVerificationWorkflow],
+        activities=[greet_user, advance_verification_run_activity, apply_verification_action_activity],
         # ThreadPoolExecutor for any sync activities added in the future
         activity_executor=ThreadPoolExecutor(5),
     )

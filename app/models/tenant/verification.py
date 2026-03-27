@@ -57,6 +57,8 @@ class VerificationRun(TenantSchemaModel, table=True):
     )
     kyc_level: Optional[str] = Field(default=None, max_length=100)
     current_step_key: Optional[str] = Field(default=None, max_length=255)
+    workflow_id: Optional[str] = Field(default=None, max_length=255, index=True)
+    workflow_run_id: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = Field(default=True, index=True)
 
     rules_snapshot: Dict[str, Any] = Field(default_factory=dict, sa_type=JSON)

@@ -59,11 +59,11 @@ async def require_tenant_header(
     except ValueError:
         pass
 
-    # schema_name: starts with a letter, contains only letters/digits/underscore, max 63
+    # tenant_key: starts with a letter, contains only letters/digits/underscore, max 63
     if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{0,62}", value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Tenant-ID must be a valid UUID or schema_name (e.g. 'ovp').",
+            detail="X-Tenant-ID must be a valid UUID or tenant_key (e.g. 'ovp').",
         )
     if jwt_tenant and value != jwt_tenant and not jwt_platform_super_admin_context.get():
         raise HTTPException(

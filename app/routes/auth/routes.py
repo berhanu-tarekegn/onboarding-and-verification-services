@@ -154,7 +154,7 @@ async def _client_for_realm_async(realm: str, *, client_alias: str | None = None
 
     async def _db_lookup() -> tuple[str, str | None] | None:
         async with async_session_factory() as session:
-            stmt = select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.schema_name == realm))
+            stmt = select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.tenant_key == realm))
             result = await session.execute(stmt)
             tenant = result.scalars().first()
             if tenant and tenant.keycloak_client_id:
@@ -248,7 +248,7 @@ async def _warn_if_default_client_mismatch(realm: str) -> None:
     async def _db_check() -> None:
         async with async_session_factory() as session:
             result = await session.execute(
-                select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.schema_name == realm))
+                select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.tenant_key == realm))
             )
             tenant = result.scalars().first()
             if tenant and tenant.keycloak_client_id and tenant.keycloak_client_id != default_cid:
@@ -635,7 +635,7 @@ async def me(
             tenant_uuid = uuid.UUID(tenant_ident)
             clause = Tenant.id == tenant_uuid
         except Exception:  # noqa: BLE001
-            clause = (Tenant.schema_name == tenant_ident) | (Tenant.keycloak_realm == tenant_ident)
+            clause = (Tenant.tenant_key == tenant_ident) | (Tenant.keycloak_realm == tenant_ident)
         try:
             r = await session.execute(select(Tenant).where(clause))
             tenant = r.scalars().first()
@@ -644,7 +644,7 @@ async def me(
             tenant = None
 
     tenant_uuid_str = str(tenant.id) if tenant else None
-    realm_key = tenant.schema_name if tenant else (realm_name or tenant_ident or None)
+    realm_key = tenant.tenant_key if tenant else (realm_name or tenant_ident or None)
 
     # Resolve effective policy docs. If unavailable (e.g., DB/migration issues),
     # fall back to code defaults so `/me` remains informative.
@@ -672,7 +672,7 @@ async def me(
         "realm": realm_name,
         "resolved_tenant": {
             "id": tenant_uuid_str,
-            "schema_name": getattr(tenant, "schema_name", None),
+            "tenant_key": getattr(tenant, "tenant_key", None),
             "keycloak_realm": getattr(tenant, "keycloak_realm", None),
         },
         "request": {

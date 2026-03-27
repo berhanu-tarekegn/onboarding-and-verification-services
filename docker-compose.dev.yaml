@@ -18,6 +18,26 @@ services:
       timeout: 5s
       retries: 5
 
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
+    environment:
+      DB: sqlite
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sqlite.yaml
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    ports:
+      - "8233:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_UI_PORT: 8080
+    depends_on:
+      - temporal
+
   api:
     build:
       context: .
@@ -54,7 +74,7 @@ services:
       JWKS_FETCH_HEADERS_JSON: ${JWKS_FETCH_HEADERS_JSON:-}
       JWKS_FETCH_TIMEOUT_SECONDS: ${JWKS_FETCH_TIMEOUT_SECONDS:-10}
 
-      TEMPORAL_HOST: ${TEMPORAL_HOST:-localhost:7233}
+      TEMPORAL_HOST: ${TEMPORAL_HOST_DOCKER:-temporal:7233}
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-onboarding-task-queue}
       TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
@@ -92,11 +112,42 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      temporal:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:7090/health')\""]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        python -m app.temporal.worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://onboarding:onboarding@db:5432/onboarding_db}
+      DATABASE_URL_DOCKER: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://onboarding:onboarding@db:5432/onboarding_db}
+      APP_NAME: ${APP_NAME:-Onboarding & Verification Service}
+      DEBUG: ${DEBUG:-true}
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-}
+      KEYCLOAK_ADMIN_BASE_URL: ${KEYCLOAK_ADMIN_BASE_URL:-}
+      KEYCLOAK_TRUSTED_ISSUER_BASES: ${KEYCLOAK_TRUSTED_ISSUER_BASES:-}
+      TEMPORAL_HOST: ${TEMPORAL_HOST_DOCKER:-temporal:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-onboarding-task-queue}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_REQUIRED: ${TEMPORAL_REQUIRED:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      temporal:
+        condition: service_started
 
 volumes:
   postgres_data_dev:

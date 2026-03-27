@@ -23,18 +23,16 @@ router = APIRouter(
 
 def _require_initialization_key(
     x_initialization_key: str | None = Header(default=None, alias="X-Initialization-Key"),
-    x_provisioning_key: str | None = Header(default=None, alias="X-Provisioning-Key"),
 ) -> None:
     """Optional internal guard for platform tenant initialization endpoints.
 
     When PLATFORM_INITIALIZATION_API_KEY is set, callers must include a matching
-    initialization header. `X-Provisioning-Key` remains accepted for backwards
-    compatibility.
+    X-Initialization-Key header.
     """
     expected = (get_settings().PLATFORM_PROVISIONING_API_KEY or "").strip()
     if not expected:
         return
-    provided = (x_initialization_key or x_provisioning_key or "").strip()
+    provided = (x_initialization_key or "").strip()
     if provided != expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -44,7 +42,7 @@ def _require_initialization_key(
 def _assert_tenant_admin_scope(ctx: AuthContext, tenant: Tenant) -> None:
     if is_master_realm_super_admin(ctx):
         return
-    allowed_tenants = {tenant.schema_name, (tenant.keycloak_realm or "").strip()}
+    allowed_tenants = {tenant.tenant_key, (tenant.keycloak_realm or "").strip()}
     if (ctx.tenant_id or "").strip() in allowed_tenants:
         return
     raise HTTPException(
@@ -157,7 +155,7 @@ async def create_my_tenant_user(
             detail={"code": "missing_tenant_id", "message": "Tenant context is missing from token."},
         )
     r = await session.execute(
-        select(Tenant).where((Tenant.schema_name == realm_key) | (Tenant.keycloak_realm == realm_key))
+        select(Tenant).where((Tenant.tenant_key == realm_key) | (Tenant.keycloak_realm == realm_key))
     )
     tenant = r.scalars().first()
     if tenant is None:

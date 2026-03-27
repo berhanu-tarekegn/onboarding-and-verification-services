@@ -225,7 +225,7 @@ class TestTenantsTable:
         assert {
             "id",
             "name",
-            "schema_name",
+            "tenant_key",
             "is_active",
             "keycloak_realm",
             "keycloak_client_id",
@@ -234,41 +234,41 @@ class TestTenantsTable:
             "updated_at",
         }.issubset(cols)
 
-    async def test_schema_name_is_unique(self, conn):
+    async def test_tenant_key_is_unique(self, conn):
         unique = await _unique_cols(conn, "tenants")
-        assert "schema_name" in unique
+        assert "tenant_key" in unique
 
-    async def test_schema_name_check_constraint_exists(self, conn):
+    async def test_tenant_key_check_constraint_exists(self, conn):
         checks = await _checks(conn, "tenants")
-        assert any("schema_name" in c for c in checks)
+        assert any("tenant_key" in c for c in checks)
 
-    async def test_valid_schema_name_accepted(self, conn):
+    async def test_valid_tenant_key_accepted(self, conn):
         sp = await conn.begin_nested()
         try:
             await conn.execute(text("""
-                INSERT INTO public.tenants (id, name, schema_name, is_active)
+                INSERT INTO public.tenants (id, name, tenant_key, is_active)
                 VALUES (gen_random_uuid(), 'Good Corp', 'good_corp_1', true)
             """))
         finally:
             await sp.rollback()
 
-    async def test_uppercase_schema_name_rejected(self, conn):
+    async def test_uppercase_tenant_key_rejected(self, conn):
         sp = await conn.begin_nested()
         try:
             with pytest.raises(Exception):
                 await conn.execute(text("""
-                    INSERT INTO public.tenants (id, name, schema_name, is_active)
+                    INSERT INTO public.tenants (id, name, tenant_key, is_active)
                     VALUES (gen_random_uuid(), 'Bad', 'BadName', true)
                 """))
         finally:
             await sp.rollback()
 
-    async def test_hyphen_in_schema_name_rejected(self, conn):
+    async def test_hyphen_in_tenant_key_rejected(self, conn):
         sp = await conn.begin_nested()
         try:
             with pytest.raises(Exception):
                 await conn.execute(text("""
-                    INSERT INTO public.tenants (id, name, schema_name, is_active)
+                    INSERT INTO public.tenants (id, name, tenant_key, is_active)
                     VALUES (gen_random_uuid(), 'Bad', 'bad-name', true)
                 """))
         finally:
@@ -402,7 +402,7 @@ class TestTenantSchemaProvisioning:
             await c.execute(text(f"SET search_path TO {provisioned_tenant}, public"))
             r = await c.execute(text("SELECT version_num FROM alembic_version"))
             row = r.fetchone()
-            assert row and row[0] == "004"
+            assert row and row[0] == "005"
 
     async def test_all_tenant_tables_exist(self, pg, provisioned_tenant):
         expected = {
@@ -541,6 +541,8 @@ class TestTenantVerificationTables:
             "status",
             "decision",
             "kyc_level",
+            "workflow_id",
+            "workflow_run_id",
             "rules_snapshot",
             "facts_snapshot",
             "result_snapshot",

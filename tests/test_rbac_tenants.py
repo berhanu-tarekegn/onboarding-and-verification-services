@@ -151,7 +151,7 @@ class TestTenantsRBAC(unittest.IsolatedAsyncioTestCase):
     async def test_tenant_admin_can_create_user_for_own_tenant(self) -> None:
         tenant_id = uuid4()
         token = self._token(roles=["tenant_admin"], issuer_realm="ovp", tenant_id="ovp")
-        tenant = SimpleNamespace(id=tenant_id, schema_name="ovp", keycloak_realm="ovp")
+        tenant = SimpleNamespace(id=tenant_id, tenant_key="ovp", keycloak_realm="ovp")
         created = TenantUserRead(
             realm="ovp",
             user_id="kc-user-1",
@@ -181,7 +181,7 @@ class TestTenantsRBAC(unittest.IsolatedAsyncioTestCase):
     async def test_tenant_admin_cannot_manage_other_tenant(self) -> None:
         tenant_id = uuid4()
         token = self._token(roles=["tenant_admin"], issuer_realm="daf", tenant_id="daf")
-        tenant = SimpleNamespace(id=tenant_id, schema_name="ovp", keycloak_realm="ovp")
+        tenant = SimpleNamespace(id=tenant_id, tenant_key="ovp", keycloak_realm="ovp")
 
         with patch("app.routes.tenants.tenant.tenant_svc.get_tenant", new=AsyncMock(return_value=tenant)):
             resp = await self.client.post(

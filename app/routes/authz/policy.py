@@ -22,12 +22,11 @@ router = APIRouter(prefix="/authz", tags=["authz"])
 
 def _require_initialization_key(
     x_initialization_key: str | None = Header(default=None, alias="X-Initialization-Key"),
-    x_provisioning_key: str | None = Header(default=None, alias="X-Provisioning-Key"),
 ) -> None:
     expected = (get_settings().PLATFORM_PROVISIONING_API_KEY or "").strip()
     if not expected:
         return
-    provided = (x_initialization_key or x_provisioning_key or "").strip()
+    provided = (x_initialization_key or "").strip()
     if provided != expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -58,7 +57,7 @@ async def update_global_policy(
 
 async def _resolve_tenant_uuid_by_realm(session: AsyncSession, *, realm: str) -> UUID:
     r = await session.execute(
-        select(Tenant).where((Tenant.schema_name == realm) | (Tenant.keycloak_realm == realm))
+        select(Tenant).where((Tenant.tenant_key == realm) | (Tenant.keycloak_realm == realm))
     )
     tenant = r.scalars().first()
     if tenant is None:

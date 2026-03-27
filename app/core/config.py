@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     #   /realms/<realm>/.well-known/openid-configuration
     # Results are cached for this many seconds.
     KEYCLOAK_REALM_DISCOVERY_TTL_SECONDS: int = 60 * 60
+    # Dedicated application realm for platform super admins.
+    # This is separate from the Keycloak admin realm used for provisioning.
+    KEYCLOAK_PLATFORM_REALM: str = Field(
+        default="oaas-platform",
+        validation_alias=AliasChoices("KEYCLOAK_PLATFORM_REALM", "KEYCLOAK_SUPER_ADMIN_REALM"),
+    )
 
     # ── Keycloak tenant initialization (US-201) ──────────
     # Optional dedicated base URL for Keycloak Admin API calls. This is useful
@@ -112,6 +118,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("KEYCLOAK_TENANT_INITIALIZATION_REQUIRED", "KEYCLOAK_PROVISIONING_REQUIRED"),
     )
+    # Keycloak admin realm used for admin API access and realm initialization.
+    # In production this is commonly still `master`, even when platform users log
+    # into a separate app-facing platform realm.
     KEYCLOAK_ADMIN_REALM: str = "master"
     KEYCLOAK_ADMIN_CLIENT_ID: str = "admin-cli"
     # Optional: prefer client_credentials (service account) over admin user/pass.

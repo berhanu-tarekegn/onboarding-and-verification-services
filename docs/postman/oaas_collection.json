@@ -40,7 +40,7 @@
       "value": "test123"
     },
     {
-      "key": "provisioning_key",
+      "key": "initialization_key",
       "value": ""
     },
     {
@@ -151,8 +151,8 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/policy"
@@ -168,8 +168,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/policy",
@@ -185,8 +185,8 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/realm-policy/{{realm}}"
@@ -202,8 +202,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/realm-policy/{{realm}}",
@@ -219,8 +219,8 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/policy/{{realm}}"
@@ -236,8 +236,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/authz/policy/{{realm}}",
@@ -269,14 +269,14 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/tenants",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Test Platform\",\n  \"schema_name\": \"{{tenant}}\"\n}\n"
+              "raw": "{\n  \"name\": \"Test Platform\",\n  \"tenant_key\": \"{{tenant}}\"\n}\n"
             }
           },
           "event": [
@@ -310,8 +310,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
             "url": "{{base_url}}/api/v1/tenants/{{tenant_id}}/users",
@@ -331,11 +331,11 @@
                 "value": "application/json"
               },
               {
-                "key": "X-Provisioning-Key",
-                "value": "{{provisioning_key}}"
+                "key": "X-Initialization-Key",
+                "value": "{{initialization_key}}"
               }
             ],
-            "url": "{{base_url}}/api/v1/tenants/me/users",
+            "url": "{{base_url}}/api/v1/tenants/users",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"national_id\": \"1234567890123416\",\n  \"username\": \"{{realm}}_maker\",\n  \"password\": \"test123\",\n  \"roles\": [\"maker\"],\n  \"first_name\": \"Maker\",\n  \"last_name\": \"User\",\n  \"email\": \"maker@example.com\",\n  \"phone_number\": \"+251900020000\",\n  \"address\": \"Addis Ababa\"\n}\n"

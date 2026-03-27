@@ -467,14 +467,19 @@ def get_issuer_realm(payload: dict[str, Any]) -> str | None:
     return issuer.split("/realms/", 1)[1].split("/", 1)[0] or None
 
 
-def is_master_realm_super_admin(ctx: AuthContext) -> bool:
+def is_platform_realm_super_admin(ctx: AuthContext) -> bool:
     if not get_settings().AUTH_ENABLED:
         return "super_admin" in set(ctx.roles)
     realm = get_issuer_realm(ctx.raw_claims)
     if not realm:
         return False
-    master = (get_settings().KEYCLOAK_ADMIN_REALM or "master").strip() or "master"
-    return realm == master and ("super_admin" in set(ctx.roles))
+    platform = (get_settings().KEYCLOAK_PLATFORM_REALM or "oaas-platform").strip() or "oaas-platform"
+    return realm == platform and ("super_admin" in set(ctx.roles))
+
+
+def is_master_realm_super_admin(ctx: AuthContext) -> bool:
+    """Backward-compatible alias; platform realm is now the authority."""
+    return is_platform_realm_super_admin(ctx)
 
 def _parse_exclusive_role_groups(value: str) -> list[set[str]]:
     groups: list[set[str]] = []
@@ -490,8 +495,8 @@ def _parse_exclusive_role_groups(value: str) -> list[set[str]]:
 
 def _enforce_role_exclusivity(payload: dict[str, Any], roles: frozenset[str]) -> None:
     # Platform super admin bypass: allow multi-role tokens for ops.
-    master = (get_settings().KEYCLOAK_ADMIN_REALM or "master").strip() or "master"
-    if get_issuer_realm(payload) == master and "super_admin" in roles:
+    platform = (get_settings().KEYCLOAK_PLATFORM_REALM or "oaas-platform").strip() or "oaas-platform"
+    if get_issuer_realm(payload) == platform and "super_admin" in roles:
         return
     settings = get_settings()
     for group in _parse_exclusive_role_groups(settings.AUTH_EXCLUSIVE_ROLE_GROUPS):
@@ -652,7 +657,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         request.state.auth = ctx
         jwt_tenant_token = jwt_tenant_context.set(ctx.tenant_id)
         jwt_roles_token = jwt_roles_context.set(ctx.roles)
-        jwt_platform_admin_token = jwt_platform_super_admin_context.set(is_master_realm_super_admin(ctx))
+        jwt_platform_admin_token = jwt_platform_super_admin_context.set(is_platform_realm_super_admin(ctx))
         user_token = user_context.set(ctx.user_id)
         try:
             return await call_next(request)

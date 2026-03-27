@@ -508,7 +508,7 @@ async def create_tenant_user(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
                     "code": "keycloak_forbidden",
-                    "message": "Keycloak tenant initialization account is missing permissions (grant manage-users/view-users in master realm).",
+                    "message": "Keycloak tenant initialization account is missing permissions in the configured Keycloak admin realm (grant manage-users/view-users).",
                     "details": details,
                 },
             ) from exc

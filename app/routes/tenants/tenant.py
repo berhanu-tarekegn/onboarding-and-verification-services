@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
-from app.core.auth import AuthContext, is_master_realm_super_admin
+from app.core.auth import AuthContext, is_platform_realm_super_admin
 from app.core.authz import require_platform_super_admin, require_tenant_admin
 from app.core.config import get_settings
 from app.db.session import get_engine, get_public_session
@@ -40,7 +40,7 @@ def _require_initialization_key(
         )
 
 def _assert_tenant_admin_scope(ctx: AuthContext, tenant: Tenant) -> None:
-    if is_master_realm_super_admin(ctx):
+    if is_platform_realm_super_admin(ctx):
         return
     allowed_tenants = {tenant.tenant_key, (tenant.keycloak_realm or "").strip()}
     if (ctx.tenant_id or "").strip() in allowed_tenants:
@@ -140,7 +140,7 @@ async def create_my_tenant_user(
     ctx: AuthContext = Depends(require_tenant_admin()),
 ):
     """Create a Keycloak user for the caller's tenant (derived from JWT tenant claim)."""
-    if is_master_realm_super_admin(ctx):
+    if is_platform_realm_super_admin(ctx):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={

@@ -17,13 +17,8 @@ Generate an environment file and import it into Postman:
   --tenant "demo" \
   --username "demo_super_admin" \
   --password "test123" \
+  --initialization-key "<your key>" \
   > docs/postman/oaas_local.postman_environment.json
-```
-
-If you set `PLATFORM_PROVISIONING_API_KEY` in the server, also pass:
-
-```bash
-  --provisioning-key "<your key>"
 ```
 
 ## Flow

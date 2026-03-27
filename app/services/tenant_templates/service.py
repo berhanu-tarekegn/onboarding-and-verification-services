@@ -31,6 +31,7 @@ from app.models.public.baseline_template import (
 )
 from app.models.enums import DefinitionReviewAction, DefinitionReviewStatus, TemplateType
 from app.core.context import get_current_user
+from app.core.config import get_settings
 from app.schemas.tenant_templates import (
     TenantTemplateCreate,
     TenantTemplateUpdate,
@@ -791,7 +792,11 @@ async def approve_tenant_template_definition(
             detail="Definition must be pending review before approval.",
         )
     reviewer = get_current_user()
-    if version.submitted_for_review_by and reviewer == version.submitted_for_review_by:
+    if (
+        get_settings().AUTH_ENABLED
+        and version.submitted_for_review_by
+        and reviewer == version.submitted_for_review_by
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Submitter cannot approve their own definition.",

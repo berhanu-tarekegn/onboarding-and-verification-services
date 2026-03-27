@@ -83,6 +83,7 @@ class TestTenantsRBAC(unittest.IsolatedAsyncioTestCase):
         os.environ["AUTH_AUDIENCE"] = ""
         os.environ["AUTH_ISSUERS"] = ""
         os.environ["KEYCLOAK_ADMIN_REALM"] = "master"
+        os.environ["KEYCLOAK_PLATFORM_REALM"] = "oaas-platform"
         os.environ["KEYCLOAK_TRUSTED_ISSUER_BASES"] = "https://keycloak.dev"
         os.environ["KEYCLOAK_JWKS_JSON"] = json.dumps(self.jwks)
 
@@ -139,8 +140,8 @@ class TestTenantsRBAC(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()["detail"]["code"], "platform_admin_required")
 
-    async def test_master_realm_super_admin_can_list_tenants(self) -> None:
-        token = self._token(roles=["super_admin"], issuer_realm="master")
+    async def test_platform_realm_super_admin_can_list_tenants(self) -> None:
+        token = self._token(roles=["super_admin"], issuer_realm="oaas-platform")
         resp = await self.client.get(
             "/api/v1/tenants",
             headers={"Authorization": f"Bearer {token}"},

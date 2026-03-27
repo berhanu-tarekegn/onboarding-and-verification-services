@@ -1,0 +1,203 @@
+{
+  "tenant": {
+    "name": "Abyssinia Corporate Bank",
+    "tenant_key": "abyssinia_corp"
+  },
+  "platform_admin": {
+    "realm": "oaas-platform",
+    "username": "platform.admin",
+    "password": "117f19dd3c2c8164c9ee2642e0da6f65"
+  },
+  "tenant_bootstrap_admin": {
+    "realm": "abyssinia_corp",
+    "username": "abyssinia_corp_tenant_admin",
+    "password": "35314f15d69125e4b6789d74ff26e18b"
+  },
+  "product": {
+    "name": "Digital Current Account",
+    "product_code": "dca_001",
+    "description": "Current account onboarding for salaried and SME applicants"
+  },
+  "template_version": {
+    "version_tag": "2026.03.27",
+    "changelog": "Retail and agent-assisted onboarding with Temporal-backed verification",
+    "rules_config": {
+      "submission_search": {
+        "filters": [
+          {
+            "key": "national_id",
+            "label": "National ID",
+            "source": "form_data",
+            "path": "national_id",
+            "operators": ["eq", "contains"]
+          },
+          {
+            "key": "phone_number",
+            "label": "Phone Number",
+            "source": "form_data",
+            "path": "phone_number",
+            "operators": ["eq", "contains"]
+          },
+          {
+            "key": "name_match_score",
+            "label": "Name Match Score",
+            "source": "verification",
+            "path": "steps.name_match.result_snapshot.score",
+            "operators": ["gte", "lte"]
+          }
+        ]
+      },
+      "verification_flow": {
+        "flow_key": "default",
+        "demo_registry": {
+          "FID-ETH-0003456789": {
+            "otp_code": "222222",
+            "registered_phone": "+251911112233",
+            "first_name": "Meron",
+            "last_name": "Tesfaye",
+            "date_of_birth": "1994-08-14"
+          },
+          "FID-ETH-0003456790": {
+            "otp_code": "333333",
+            "registered_phone": "+251922223344",
+            "first_name": "Dawit",
+            "last_name": "Kebede",
+            "date_of_birth": "1988-11-02"
+          }
+        },
+        "steps": [
+          {
+            "key": "phone_otp",
+            "name": "Customer Phone OTP",
+            "type": "challenge_response",
+            "adapter": "demo_phone_otp",
+            "input": {
+              "phone_number": "$answers.phone_number"
+            },
+            "demo_code": "111111",
+            "max_attempts": 3
+          },
+          {
+            "key": "fayda_lookup",
+            "name": "Fayda OTP and Identity Pull",
+            "type": "challenge_response",
+            "adapter": "demo_fayda_otp",
+            "depends_on": ["phone_otp"],
+            "input": {
+              "national_id": "$answers.national_id"
+            },
+            "max_attempts": 3
+          },
+          {
+            "key": "name_match",
+            "name": "Applicant Name Match",
+            "type": "comparison",
+            "adapter": "demo_fuzzy_match",
+            "depends_on": ["fayda_lookup"],
+            "pairs": [
+              {
+                "label": "First Name",
+                "left": "$answers.first_name",
+                "right": "$steps.fayda_lookup.result.attributes.first_name"
+              },
+              {
+                "label": "Last Name",
+                "left": "$answers.last_name",
+                "right": "$steps.fayda_lookup.result.attributes.last_name"
+              }
+            ],
+            "pass_score_gte": 0.95,
+            "review_score_gte": 0.8
+          }
+        ],
+        "decision": {
+          "rules": [
+            {
+              "decision": "approved",
+              "kyc_level": "level_2",
+              "all": [
+                { "fact": "steps.phone_otp.outcome", "equals": "pass" },
+                { "fact": "steps.fayda_lookup.outcome", "equals": "pass" },
+                { "fact": "steps.name_match.result.score", "gte": 0.95 }
+              ],
+              "reason_codes": ["phone_verified", "fayda_verified", "name_match_passed"]
+            },
+            {
+              "decision": "manual_review",
+              "kyc_level": "level_1",
+              "all": [
+                { "fact": "steps.phone_otp.outcome", "equals": "pass" },
+                { "fact": "steps.fayda_lookup.outcome", "equals": "pass" },
+                { "fact": "steps.name_match.result.score", "gte": 0.8 }
+              ],
+              "reason_codes": ["borderline_name_match"]
+            }
+          ],
+          "fallback": {
+            "decision": "rejected",
+            "kyc_level": "level_0",
+            "reason_codes": ["verification_failed"]
+          }
+        }
+      }
+    }
+  },
+  "submissions": [
+    {
+      "name": "Self-service individual customer",
+      "journey": "self_service_online",
+      "submitter_id": "cust-2026-0001",
+      "external_ref": "WEB-ONB-10001",
+      "form_data": {
+        "first_name": "Meron",
+        "last_name": "Tesfaye",
+        "gender": "female",
+        "date_of_birth": "1994-08-14",
+        "national_id": "FID-ETH-0003456789",
+        "phone_number": "+251911110000",
+        "email": "meron.tesfaye@example.com",
+        "city": "Addis Ababa",
+        "sub_city": "Bole",
+        "employment_status": "salaried",
+        "monthly_income_range": "50001-100000",
+        "account_purpose": "salary_and_daily_transactions"
+      },
+      "expected_demo_codes": {
+        "phone_otp": "111111",
+        "fayda_lookup": "222222"
+      },
+      "expected_outcome": {
+        "decision": "approved",
+        "kyc_level": "level_2"
+      }
+    },
+    {
+      "name": "Agent-assisted deferred onboarding",
+      "journey": "agent_assisted_offline",
+      "submitter_id": "cust-2026-0002",
+      "external_ref": "BR-AGT-22018",
+      "form_data": {
+        "first_name": "Dawit",
+        "last_name": "Kebede",
+        "gender": "male",
+        "date_of_birth": "1988-11-02",
+        "national_id": "FID-ETH-0003456790",
+        "phone_number": "+251922220000",
+        "email": "dawit.kebede@example.com",
+        "city": "Bahir Dar",
+        "employment_status": "business_owner",
+        "business_name": "Blue Nile Trading PLC",
+        "trade_license_number": "TL-2026-00991",
+        "account_purpose": "merchant_collections"
+      },
+      "expected_demo_codes": {
+        "phone_otp": "111111",
+        "fayda_lookup": "333333"
+      },
+      "expected_outcome": {
+        "decision": "approved",
+        "kyc_level": "level_2"
+      }
+    }
+  ]
+}

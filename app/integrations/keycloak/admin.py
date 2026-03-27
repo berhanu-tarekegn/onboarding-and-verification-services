@@ -131,8 +131,8 @@ async def ensure_realm(
     if resp.status_code == 403:
         raise RuntimeError(
             "Keycloak provisioning account is not allowed to create realms. "
-            "In the 'master' realm, grant the provisioner service account admin permissions "
-            "(often via client roles under 'realm-management' or 'master-realm', depending on your Keycloak). "
+            "In the configured Keycloak admin realm, grant the provisioner service account admin permissions "
+            "(for example built-in realm roles in 'master', or admin client roles depending on your Keycloak setup). "
             "Minimum typically includes: 'create-realm' + 'manage-realm' + 'manage-clients' + 'view-realm'."
         )
     resp.raise_for_status()
@@ -156,8 +156,7 @@ async def ensure_roles(realm: str, roles: list[str]) -> None:
     if resp.status_code == 403:
         raise RuntimeError(
             f"Keycloak provisioning account is not allowed to manage roles in realm '{realm}'. "
-            "In the 'master' realm, grant the provisioner service account permissions to manage realms/roles "
-            "(often via client roles under 'realm-management' or 'master-realm'). "
+            "In the configured Keycloak admin realm, grant the provisioner service account permissions to manage realms/roles. "
             "Minimum typically includes: 'manage-realm' + 'view-realm'."
         )
     resp.raise_for_status()
@@ -171,8 +170,7 @@ async def ensure_roles(realm: str, roles: list[str]) -> None:
         if create.status_code == 403:
             raise RuntimeError(
                 f"Keycloak provisioning account is not allowed to create roles in realm '{realm}'. "
-                "In the 'master' realm, grant the provisioner service account permissions to manage realms/roles "
-                "(often via client roles under 'realm-management' or 'master-realm'). "
+                "In the configured Keycloak admin realm, grant the provisioner service account permissions to manage realms/roles. "
                 "Minimum typically includes: 'manage-realm'."
             )
         if create.status_code not in (201, 204):

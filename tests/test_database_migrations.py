@@ -179,6 +179,7 @@ class TestPublicSchemaExists:
         "question_groups", "questions", "question_options",
         "submissions", "submission_answers",
         "submission_status_history", "submission_comments", "products",
+        "verification_runs", "verification_step_runs",
     }
 
     async def test_all_public_tables_exist(self, conn):
@@ -200,10 +201,10 @@ class TestPublicSchemaExists:
         leaked = self.TENANT_ONLY & actual
         assert not leaked, f"Tenant tables leaked into public schema: {leaked}"
 
-    async def test_alembic_version_is_002(self, conn):
+    async def test_alembic_version_is_004(self, conn):
         r = await conn.execute(text("SELECT version_num FROM public.alembic_version"))
         row = r.fetchone()
-        assert row and row[0] == "003", f"Expected version 003, got {row}"
+        assert row and row[0] == "004", f"Expected version 004, got {row}"
 
 
 class TestTemplateTypeEnum:
@@ -401,7 +402,7 @@ class TestTenantSchemaProvisioning:
             await c.execute(text(f"SET search_path TO {provisioned_tenant}, public"))
             r = await c.execute(text("SELECT version_num FROM alembic_version"))
             row = r.fetchone()
-            assert row and row[0] == "003"
+            assert row and row[0] == "004"
 
     async def test_all_tenant_tables_exist(self, pg, provisioned_tenant):
         expected = {
@@ -410,6 +411,7 @@ class TestTenantSchemaProvisioning:
             "question_groups", "questions", "question_options",
             "submissions", "submission_answers",
             "submission_status_history", "submission_comments", "products",
+            "verification_runs", "verification_step_runs",
             "transform_rule_sets", "transform_rules", "transform_logs",
         }
         async with pg.connect() as c:
@@ -524,6 +526,49 @@ class TestTenantProductsTable:
         async with pg.connect() as c:
             default = await _col_default(c, "products", "status", provisioned_tenant)
         assert default and "draft" in default.lower()
+
+
+class TestTenantVerificationTables:
+    async def test_verification_runs_required_columns(self, pg, provisioned_tenant):
+        async with pg.connect() as c:
+            cols = await _columns(c, "verification_runs", provisioned_tenant)
+        assert {
+            "id",
+            "submission_id",
+            "template_version_id",
+            "flow_key",
+            "journey",
+            "status",
+            "decision",
+            "kyc_level",
+            "rules_snapshot",
+            "facts_snapshot",
+            "result_snapshot",
+            "started_at",
+            "completed_at",
+        }.issubset(cols)
+
+    async def test_verification_step_runs_required_columns(self, pg, provisioned_tenant):
+        async with pg.connect() as c:
+            cols = await _columns(c, "verification_step_runs", provisioned_tenant)
+        assert {
+            "id",
+            "run_id",
+            "submission_id",
+            "step_key",
+            "step_type",
+            "adapter_key",
+            "status",
+            "input_snapshot",
+            "output_snapshot",
+            "result_snapshot",
+            "action_schema",
+        }.issubset(cols)
+
+    async def test_verification_step_unique_constraint_exists(self, pg, provisioned_tenant):
+        async with pg.connect() as c:
+            constraints = await _unique_constraints(c, "verification_step_runs", provisioned_tenant)
+        assert ["run_id", "step_key"] in constraints.values()
 
 
 class TestTenantTemplatesTable:

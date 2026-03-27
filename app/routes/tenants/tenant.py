@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
-from app.core.auth import require_role
+from app.core.auth import AuthContext, is_master_realm_super_admin
+from app.core.authz import require_platform_super_admin, require_tenant_admin
 from app.core.config import get_settings
 from app.db.session import get_engine, get_public_session
 from app.schemas.tenants import TenantCreate, TenantRead, TenantUpdate, TenantUserCreate, TenantUserRead
@@ -35,9 +36,16 @@ def _require_provisioning_key(x_provisioning_key: str | None = Header(default=No
             detail={"code": "forbidden", "message": "Missing or invalid provisioning key."},
         )
 
-
-def require_platform_super_admin(ctx=Depends(require_role("super_admin"))):
-    return ctx
+def _assert_tenant_admin_scope(ctx: AuthContext, tenant: Tenant) -> None:
+    if is_master_realm_super_admin(ctx):
+        return
+    allowed_tenants = {tenant.schema_name, (tenant.keycloak_realm or "").strip()}
+    if (ctx.tenant_id or "").strip() in allowed_tenants:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": "tenant_scope_forbidden", "message": "You don't have permission to manage this tenant."},
+    )
 
 
 @router.post("", response_model=TenantRead, status_code=201)
@@ -45,7 +53,7 @@ async def create_tenant(
     data: TenantCreate,
     session: AsyncSession = Depends(get_public_session),
     _guard: None = Depends(_require_provisioning_key),
-    _ctx=Depends(require_platform_super_admin),
+    _ctx=Depends(require_platform_super_admin()),
 ):
     """Register a new tenant and provision its database schema."""
     return await tenant_svc.create_tenant(
@@ -59,7 +67,7 @@ async def create_tenant(
 @router.get("", response_model=list[TenantRead])
 async def list_tenants(
     session: AsyncSession = Depends(get_public_session),
-    _ctx=Depends(require_platform_super_admin),
+    _ctx=Depends(require_platform_super_admin()),
 ):
     """List all tenants."""
     return await tenant_svc.list_tenants(session)
@@ -69,7 +77,7 @@ async def list_tenants(
 async def get_tenant(
     tenant_id: UUID,
     session: AsyncSession = Depends(get_public_session),
-    _ctx=Depends(require_platform_super_admin),
+    _ctx=Depends(require_platform_super_admin()),
 ):
     """Get a tenant by ID."""
     return await tenant_svc.get_tenant(tenant_id, session)
@@ -80,7 +88,7 @@ async def update_tenant(
     tenant_id: UUID,
     data: TenantUpdate,
     session: AsyncSession = Depends(get_public_session),
-    _ctx=Depends(require_platform_super_admin),
+    _ctx=Depends(require_platform_super_admin()),
 ):
     """Partially update a tenant."""
     return await tenant_svc.update_tenant(tenant_id, data, session)
@@ -92,7 +100,7 @@ async def delete_tenant(
     session: AsyncSession = Depends(get_public_session),
     hard_delete: bool = Query(False, description="Drop tenant schema and delete tenant record."),
     _guard: None = Depends(_require_provisioning_key),
-    _ctx=Depends(require_platform_super_admin),
+    _ctx=Depends(require_platform_super_admin()),
 ):
     """Delete a tenant.
 
@@ -112,19 +120,11 @@ async def create_tenant_user(
     tenant_id: UUID,
     data: TenantUserCreate,
     session: AsyncSession = Depends(get_public_session),
-    _guard: None = Depends(_require_provisioning_key),
-    ctx=Depends(require_role("super_admin")),
+    ctx: AuthContext = Depends(require_tenant_admin()),
 ):
     """Create a Keycloak user for the tenant's realm and assign roles."""
     tenant = await tenant_svc.get_tenant(tenant_id, session)
-    if ctx.tenant_id not in {tenant.schema_name, (tenant.keycloak_realm or "")} and (
-        get_settings().PLATFORM_PROVISIONING_API_KEY or ""
-    ).strip():
-        # If a provisioning key is configured, we only allow cross-tenant user management with that key.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "forbidden", "message": "You don't have permission to manage users for this tenant."},
-        )
+    _assert_tenant_admin_scope(ctx, tenant)
     return await tenant_svc.create_tenant_user(tenant_id, data, session)
 
 
@@ -132,9 +132,17 @@ async def create_tenant_user(
 async def create_my_tenant_user(
     data: TenantUserCreate,
     session: AsyncSession = Depends(get_public_session),
-    ctx=Depends(require_role("super_admin")),
+    ctx: AuthContext = Depends(require_tenant_admin()),
 ):
     """Create a Keycloak user for the caller's tenant (derived from JWT tenant claim)."""
+    if is_master_realm_super_admin(ctx):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "tenant_id_required",
+                "message": "Platform super admins must use /tenants/{tenant_id}/users.",
+            },
+        )
     realm_key = (ctx.tenant_id or "").strip()
     if not realm_key:
         raise HTTPException(
@@ -157,16 +165,10 @@ async def create_my_tenant_user(
 async def get_tenant_authz_policy(
     tenant_id: UUID,
     session: AsyncSession = Depends(get_public_session),
-    ctx=Depends(require_role("super_admin")),
+    ctx: AuthContext = Depends(require_tenant_admin()),
 ):
     tenant = await tenant_svc.get_tenant(tenant_id, session)
-    if ctx.tenant_id not in {tenant.schema_name, (tenant.keycloak_realm or "")} and (
-        get_settings().PLATFORM_PROVISIONING_API_KEY or ""
-    ).strip():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "forbidden", "message": "You don't have permission to manage this tenant policy."},
-        )
+    _assert_tenant_admin_scope(ctx, tenant)
 
     row = await authz_svc.get_tenant_policy(session, tenant_id=tenant_id)
     policy = row.policy if row else {}
@@ -179,15 +181,9 @@ async def update_tenant_authz_policy(
     tenant_id: UUID,
     body: AuthzPolicyUpdate,
     session: AsyncSession = Depends(get_public_session),
-    ctx=Depends(require_role("super_admin")),
+    ctx: AuthContext = Depends(require_tenant_admin()),
 ):
     tenant = await tenant_svc.get_tenant(tenant_id, session)
-    if ctx.tenant_id not in {tenant.schema_name, (tenant.keycloak_realm or "")} and (
-        get_settings().PLATFORM_PROVISIONING_API_KEY or ""
-    ).strip():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "forbidden", "message": "You don't have permission to manage this tenant policy."},
-        )
+    _assert_tenant_admin_scope(ctx, tenant)
     row = await authz_svc.upsert_tenant_policy(session, tenant_id=tenant_id, policy=body.policy.model_dump())
     return AuthzPolicyRead(scope="tenant", tenant_id=str(tenant_id), version=row.version, policy=row.policy)

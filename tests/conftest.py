@@ -61,6 +61,7 @@ _API_DB_MODULES = {
     "tests/test_tenant_templates.py",
     "tests/test_products.py",
     "tests/test_submissions.py",
+    "tests/test_submission_verifications.py",
 }
 
 

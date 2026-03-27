@@ -9,6 +9,7 @@ from sqlmodel import SQLModel, Field
 
 from app.models.tenant.submission import SubmissionStatus
 from app.schemas.templates.form_schema import QuestionGroupRead, QuestionRead
+from app.schemas.submissions.verification import VerificationRunRead
 
 
 # ── Status History Schemas ────────────────────────────────────────────
@@ -135,6 +136,7 @@ class SubmissionReadWithHistory(SubmissionRead):
     ungrouped_questions: List[QuestionRead] = Field(default_factory=list)
     status_history: List[SubmissionStatusHistoryRead] = []
     comments: List[SubmissionCommentRead] = []
+    verification: Optional[VerificationRunRead] = None
 
 
 class SubmissionListFilters(SQLModel):

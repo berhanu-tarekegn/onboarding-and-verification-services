@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from uuid import UUID
 
-from app.core.auth import AuthContext, require_role
+from app.core.auth import AuthContext, is_master_realm_super_admin, require_role
 from app.core.config import get_settings
 from app.models.public.authz_policy import AuthzPolicy
 
@@ -44,6 +44,21 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "baseline_templates.read",
     },
     "platform_admin": {
+        "templates.read",
+        "templates.create",
+        "templates.update",
+        "templates.publish",
+        "products.read",
+        "products.create",
+        "products.update",
+        "products.delete",
+        "products.activate",
+        "products.deactivate",
+        "submissions.read_all",
+        "submissions.comment",
+        "baseline_templates.read",
+    },
+    "tenant_admin": {
         "templates.read",
         "templates.create",
         "templates.update",
@@ -215,6 +230,7 @@ class _PolicyCacheEntry:
 
 _GLOBAL_CACHE: _PolicyCacheEntry | None = None
 _TENANT_CACHE: dict[str, _PolicyCacheEntry] = {}
+TENANT_ADMIN_ROLES = frozenset({"tenant_admin", "platform_admin"})
 
 
 def _now() -> float:
@@ -486,15 +502,51 @@ def _merge_role_columns(
 
 
 def _is_master_admin(ctx: AuthContext) -> bool:
-    settings = get_settings()
-    issuer = ctx.raw_claims.get("iss")
-    if not isinstance(issuer, str):
-        return False
-    if "/realms/" not in issuer:
-        return False
-    realm = issuer.split("/realms/", 1)[1].split("/", 1)[0]
-    master = (settings.KEYCLOAK_ADMIN_REALM or "master").strip() or "master"
-    return realm == master and ("super_admin" in set(ctx.roles))
+    return is_master_realm_super_admin(ctx)
+
+
+def effective_authz_roles(ctx: AuthContext) -> set[str]:
+    roles = set(ctx.roles)
+    if get_settings().AUTH_ENABLED and "super_admin" in roles and not _is_master_admin(ctx):
+        roles.discard("super_admin")
+    return roles
+
+
+def require_platform_super_admin():
+    async def _dep(ctx: AuthContext = Depends(require_role("super_admin"))) -> AuthContext:
+        if not get_settings().AUTH_ENABLED:
+            return ctx
+        if _is_master_admin(ctx):
+            return ctx
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "platform_admin_required",
+                "message": "Platform super admin access requires a super_admin token from the admin realm.",
+            },
+        )
+
+    return _dep
+
+
+def require_tenant_admin():
+    async def _dep(
+        ctx: AuthContext = Depends(require_role(*TENANT_ADMIN_ROLES, "super_admin")),
+    ) -> AuthContext:
+        if not get_settings().AUTH_ENABLED:
+            return ctx
+        roles = effective_authz_roles(ctx)
+        if _is_master_admin(ctx) or (roles & TENANT_ADMIN_ROLES):
+            return ctx
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "tenant_admin_required",
+                "message": "Tenant admin access requires tenant_admin/platform_admin in the tenant realm or platform super admin.",
+            },
+        )
+
+    return _dep
 
 
 def require_permission(*required_perms: str):
@@ -509,8 +561,8 @@ def require_permission(*required_perms: str):
         if not get_settings().AUTH_ENABLED:
             return ctx
 
-        # super_admin bypass
-        if "super_admin" in set(ctx.roles):
+        # Platform super admin bypass
+        if _is_master_admin(ctx):
             return ctx
 
         # Resolve tenant UUID for tenant policy overlay (best-effort).
@@ -533,9 +585,10 @@ def require_permission(*required_perms: str):
         global_doc = effective.get("global") if isinstance(effective, dict) else {}
         realm_doc = effective.get("realm") if isinstance(effective, dict) else None
         tenant_doc = effective.get("tenant") if isinstance(effective, dict) else None
-        perms = _merge_role_permissions(set(ctx.roles), global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
+        roles = effective_authz_roles(ctx)
+        perms = _merge_role_permissions(roles, global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
         request.state.authz_perms = perms
-        request.state.authz_columns = _merge_role_columns(set(ctx.roles), global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
+        request.state.authz_columns = _merge_role_columns(roles, global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
 
         if "*" in perms:
             return ctx
@@ -566,7 +619,7 @@ def require_any_permission(*any_perms: str):
         if not get_settings().AUTH_ENABLED:
             return ctx
 
-        if "super_admin" in set(ctx.roles):
+        if _is_master_admin(ctx):
             return ctx
 
         tenant_uuid: str | None = None
@@ -587,9 +640,10 @@ def require_any_permission(*any_perms: str):
         global_doc = effective.get("global") if isinstance(effective, dict) else {}
         realm_doc = effective.get("realm") if isinstance(effective, dict) else None
         tenant_doc = effective.get("tenant") if isinstance(effective, dict) else None
-        perms = _merge_role_permissions(set(ctx.roles), global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
+        roles = effective_authz_roles(ctx)
+        perms = _merge_role_permissions(roles, global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
         request.state.authz_perms = perms
-        request.state.authz_columns = _merge_role_columns(set(ctx.roles), global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
+        request.state.authz_columns = _merge_role_columns(roles, global_doc=global_doc, realm_doc=realm_doc, tenant_doc=tenant_doc)
         if "*" in perms:
             return ctx
 

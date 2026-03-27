@@ -29,7 +29,7 @@ class TenantUserCreate(SQLModel):
     )
     roles: list[str] = Field(
         default_factory=list,
-        description="Realm roles to assign (e.g., maker, checker, platform_admin).",
+        description="Realm roles to assign (e.g., tenant_admin, maker, checker, platform_admin).",
     )
     email: str | None = Field(default=None, max_length=255)
     first_name: str | None = Field(default=None, max_length=255)

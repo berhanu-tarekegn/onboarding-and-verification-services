@@ -119,7 +119,7 @@ class Settings(BaseSettings):
 
     # Optional: bootstrap users created in each newly-provisioned realm.
     # Provide a JSON list like:
-    # [{"username":"{realm}_super_admin","roles":["super_admin"]},
+    # [{"username":"{realm}_tenant_admin","roles":["tenant_admin"]},
     #  {"username":"{realm}_platform_admin","roles":["platform_admin"]},
     #  {"username":"{realm}_maker","roles":["maker"]},
     #  {"username":"{realm}_checker","roles":["checker"]}]

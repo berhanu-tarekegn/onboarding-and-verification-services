@@ -9,6 +9,8 @@ Includes:
 - Submission: Form submissions capturing user data
 - SubmissionStatusHistory: Audit trail for submission workflow
 - SubmissionComment: Comments/notes on submissions
+- VerificationRun: Runtime state for configurable verification flows
+- VerificationStepRun: Per-step verification execution state
 
 Key design principles:
 - No explicit schema in table args (schema is set via search_path)
@@ -23,6 +25,7 @@ from app.models.tenant.submission import (
     SubmissionStatusHistory,
     SubmissionComment,
 )
+from app.models.tenant.verification import VerificationRun, VerificationStepRun
 
 __all__ = [
     "TenantTemplate",
@@ -31,4 +34,6 @@ __all__ = [
     "SubmissionStatus",
     "SubmissionStatusHistory",
     "SubmissionComment",
+    "VerificationRun",
+    "VerificationStepRun",
 ]

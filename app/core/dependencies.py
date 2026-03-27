@@ -4,7 +4,8 @@ import uuid
 import re
 
 from fastapi import Header, HTTPException, status
-from app.core.context import jwt_tenant_context
+
+from app.core.context import jwt_platform_super_admin_context, jwt_tenant_context
 
 
 async def require_tenant_header(
@@ -41,6 +42,14 @@ async def require_tenant_header(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         if not x_tenant_id or not x_tenant_id.strip():
+            if jwt_platform_super_admin_context.get():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "missing_tenant_header",
+                        "message": "X-Tenant-ID header is required for platform admin requests.",
+                    },
+                )
             return jwt_tenant
         value = x_tenant_id.strip()
     # UUID
@@ -56,9 +65,11 @@ async def require_tenant_header(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="X-Tenant-ID must be a valid UUID or schema_name (e.g. 'ovp').",
         )
-    if jwt_tenant and value != jwt_tenant:
+    if jwt_tenant and value != jwt_tenant and not jwt_platform_super_admin_context.get():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "tenant_mismatch", "message": "Tenant mismatch."},
         )
+    if jwt_platform_super_admin_context.get():
+        return value
     return jwt_tenant or value

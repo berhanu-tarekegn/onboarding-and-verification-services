@@ -18,6 +18,12 @@ from app.schemas.submissions.answer import (
     SubmissionAnswerRead,
     SubmissionAnswersPayload,
 )
+from app.schemas.submissions.verification import (
+    VerificationStartRequest,
+    VerificationActionRequest,
+    VerificationRunRead,
+    VerificationStepRunRead,
+)
 
 __all__ = [
     "SubmissionStatus",
@@ -34,4 +40,8 @@ __all__ = [
     "SubmissionAnswerCreate",
     "SubmissionAnswerRead",
     "SubmissionAnswersPayload",
+    "VerificationStartRequest",
+    "VerificationActionRequest",
+    "VerificationRunRead",
+    "VerificationStepRunRead",
 ]

@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.context import get_current_user, jwt_roles_context
+from app.core.context import get_current_user, jwt_platform_super_admin_context, jwt_roles_context
 from app.models.tenant.submission import (
     Submission,
     SubmissionStatus,
@@ -69,7 +69,7 @@ VALID_TRANSITIONS: Dict[SubmissionStatus, List[SubmissionStatus]] = {
     SubmissionStatus.CANCELLED: [],  # Terminal state
 }
 
-_ELEVATED_ROLES = frozenset({"checker", "platform_admin", "super_admin"})
+_ELEVATED_ROLES = frozenset({"checker", "platform_admin", "tenant_admin"})
 
 
 def _current_roles() -> frozenset[str]:
@@ -77,7 +77,7 @@ def _current_roles() -> frozenset[str]:
 
 
 def _is_super_admin() -> bool:
-    return "super_admin" in _current_roles()
+    return bool(jwt_platform_super_admin_context.get())
 
 
 def _is_maker_only() -> bool:
@@ -526,6 +526,8 @@ async def get_submission_with_merged_template(
 
     # Get comments
     comments = await list_comments(submission_id, session)
+    from app.services.verifications import service as verification_svc
+    verification = await verification_svc.get_latest_verification_run(submission_id, session)
 
     return {
         "submission": submission,
@@ -535,4 +537,5 @@ async def get_submission_with_merged_template(
         "ungrouped_questions": ungrouped_questions,
         "status_history": submission.status_history,
         "comments": comments,
+        "verification": verification,
     }

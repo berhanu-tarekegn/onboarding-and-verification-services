@@ -9,6 +9,7 @@ The tenant UUID (id) is used as the X-Tenant-ID header value.
 The schema_name field directly names the PostgreSQL schema.
 """
 
+import json
 from uuid import UUID
 from typing import Optional
 
@@ -143,7 +144,7 @@ async def create_tenant(
             await ensure_roles(
                 realm,
                 roles=[
-                    "super_admin",
+                    "tenant_admin",
                     "schema_author",
                     "platform_admin",
                     "maker",
@@ -164,6 +165,7 @@ async def create_tenant(
             session.add(tenant)
             await session.commit()
             await session.refresh(tenant)
+            await _bootstrap_tenant_realm_users(realm)
         except Exception as exc:  # noqa: BLE001
             if settings.KEYCLOAK_PROVISIONING_REQUIRED:
                 # Best-effort: if we created the realm in this attempt, try to delete it
@@ -298,12 +300,91 @@ async def delete_tenant(
 
 
 _ALLOWED_REALM_ROLES: set[str] = {
-    "super_admin",
+    "tenant_admin",
     "schema_author",
     "platform_admin",
     "maker",
     "checker",
 }
+
+
+def _render_bootstrap_template(value: str, *, realm: str) -> str:
+    return value.replace("{realm}", realm)
+
+
+def _load_bootstrap_users(realm: str) -> list[dict[str, object]]:
+    settings = get_settings()
+    raw = (settings.KEYCLOAK_BOOTSTRAP_USERS_JSON or "").strip()
+    password = (settings.KEYCLOAK_BOOTSTRAP_PASSWORD or "").strip()
+    if not raw or not password:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("KEYCLOAK_BOOTSTRAP_USERS_JSON is not valid JSON") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("KEYCLOAK_BOOTSTRAP_USERS_JSON must be a JSON array")
+
+    rendered: list[dict[str, object]] = []
+    email_domain = (settings.KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN or "example.com").strip() or "example.com"
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Bootstrap user at index {index} must be an object")
+        username_raw = item.get("username")
+        if not isinstance(username_raw, str) or not username_raw.strip():
+            raise RuntimeError(f"Bootstrap user at index {index} is missing username")
+        username = _render_bootstrap_template(username_raw.strip(), realm=realm)
+        role_items = item.get("roles")
+        if not isinstance(role_items, list) or not role_items:
+            raise RuntimeError(f"Bootstrap user '{username}' must define at least one role")
+        roles = [
+            _render_bootstrap_template(role.strip(), realm=realm)
+            for role in role_items
+            if isinstance(role, str) and role.strip()
+        ]
+        invalid = sorted({role for role in roles if role not in _ALLOWED_REALM_ROLES})
+        if invalid:
+            raise RuntimeError(
+                f"Bootstrap user '{username}' includes unsupported roles: {', '.join(invalid)}"
+            )
+        email = item.get("email")
+        if isinstance(email, str) and email.strip():
+            email_value = _render_bootstrap_template(email.strip(), realm=realm)
+        else:
+            email_value = f"{username}@{email_domain}"
+        first_name = item.get("first_name")
+        last_name = item.get("last_name")
+        rendered.append(
+            {
+                "username": username,
+                "roles": roles,
+                "email": email_value,
+                "first_name": _render_bootstrap_template(first_name.strip(), realm=realm)
+                if isinstance(first_name, str) and first_name.strip()
+                else None,
+                "last_name": _render_bootstrap_template(last_name.strip(), realm=realm)
+                if isinstance(last_name, str) and last_name.strip()
+                else None,
+            }
+        )
+    return rendered
+
+
+async def _bootstrap_tenant_realm_users(realm: str) -> None:
+    settings = get_settings()
+    password = (settings.KEYCLOAK_BOOTSTRAP_PASSWORD or "").strip()
+    if not password:
+        return
+    for user in _load_bootstrap_users(realm):
+        user_id = await ensure_user(
+            realm,
+            username=str(user["username"]),
+            email=str(user["email"]) if user.get("email") else None,
+            first_name=str(user["first_name"]) if user.get("first_name") else None,
+            last_name=str(user["last_name"]) if user.get("last_name") else None,
+        )
+        await set_user_password(realm, user_id=user_id, password=password, temporary=False)
+        await assign_realm_roles(realm, user_id=user_id, roles=list(user["roles"]))
 
 
 async def create_tenant_user(

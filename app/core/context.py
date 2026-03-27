@@ -4,6 +4,7 @@ Context variables:
 - tenant_context: tenant identifier from JWT or `X-Tenant-ID`
 - jwt_tenant_context: raw tenant identifier from the JWT claim
 - jwt_roles_context: roles extracted from the JWT
+- jwt_platform_super_admin_context: whether the JWT is from the platform admin realm
 - tenant_id_context: resolved tenant UUID
 - user_context: current user id for audit trails
 """
@@ -26,6 +27,11 @@ jwt_tenant_context: ContextVar[str | None] = ContextVar("jwt_tenant_context", de
 # Holds the roles from the JWT (if present).
 jwt_roles_context: ContextVar[frozenset[str] | None] = ContextVar(
     "jwt_roles_context", default=None
+)
+
+# Holds whether the JWT belongs to a platform super admin from the admin realm.
+jwt_platform_super_admin_context: ContextVar[bool] = ContextVar(
+    "jwt_platform_super_admin", default=False
 )
 
 # Holds the tenant UUID (resolved from the tenant identifier) for the current request.

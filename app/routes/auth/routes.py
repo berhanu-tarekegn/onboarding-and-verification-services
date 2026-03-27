@@ -28,7 +28,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import get_settings
 from app.core.auth import AuthContext, require_role
-from app.core.authz import get_effective_policy, known_permissions, resolve_permissions_and_columns
+from app.core.authz import effective_authz_roles, get_effective_policy, known_permissions, resolve_permissions_and_columns
 from app.db.session import get_public_session
 from app.db.session import async_session_factory
 from app.models.public.tenant import Tenant
@@ -601,7 +601,7 @@ async def me(
         bundle = {"global": {}, "realm": {}, "tenant": {}}
 
     perms, columns = resolve_permissions_and_columns(
-        set(ctx.roles),
+        effective_authz_roles(ctx),
         global_doc=bundle.get("global") if isinstance(bundle.get("global"), dict) else {},
         realm_doc=bundle.get("realm") if isinstance(bundle.get("realm"), dict) else None,
         tenant_doc=bundle.get("tenant") if isinstance(bundle.get("tenant"), dict) else None,

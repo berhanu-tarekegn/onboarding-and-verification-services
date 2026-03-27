@@ -26,7 +26,12 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
-from app.core.context import jwt_roles_context, jwt_tenant_context, user_context
+from app.core.context import (
+    jwt_platform_super_admin_context,
+    jwt_roles_context,
+    jwt_tenant_context,
+    user_context,
+)
 from app.core.errors import error_response
 
 logger = logging.getLogger(__name__)
@@ -454,6 +459,23 @@ def _extract_roles(payload: dict[str, Any]) -> frozenset[str]:
 
     return frozenset(roles)
 
+
+def get_issuer_realm(payload: dict[str, Any]) -> str | None:
+    issuer = payload.get("iss")
+    if not isinstance(issuer, str) or "/realms/" not in issuer:
+        return None
+    return issuer.split("/realms/", 1)[1].split("/", 1)[0] or None
+
+
+def is_master_realm_super_admin(ctx: AuthContext) -> bool:
+    if not get_settings().AUTH_ENABLED:
+        return "super_admin" in set(ctx.roles)
+    realm = get_issuer_realm(ctx.raw_claims)
+    if not realm:
+        return False
+    master = (get_settings().KEYCLOAK_ADMIN_REALM or "master").strip() or "master"
+    return realm == master and ("super_admin" in set(ctx.roles))
+
 def _parse_exclusive_role_groups(value: str) -> list[set[str]]:
     groups: list[set[str]] = []
     raw = (value or "").strip()
@@ -466,9 +488,10 @@ def _parse_exclusive_role_groups(value: str) -> list[set[str]]:
     return groups
 
 
-def _enforce_role_exclusivity(roles: frozenset[str]) -> None:
-    # super_admin bypass: allow multi-role tokens for ops.
-    if "super_admin" in roles:
+def _enforce_role_exclusivity(payload: dict[str, Any], roles: frozenset[str]) -> None:
+    # Platform super admin bypass: allow multi-role tokens for ops.
+    master = (get_settings().KEYCLOAK_ADMIN_REALM or "master").strip() or "master"
+    if get_issuer_realm(payload) == master and "super_admin" in roles:
         return
     settings = get_settings()
     for group in _parse_exclusive_role_groups(settings.AUTH_EXCLUSIVE_ROLE_GROUPS):
@@ -492,7 +515,7 @@ def _build_auth_context(payload: dict[str, Any]) -> AuthContext:
         raise _unauthorized("Missing tenant id", code="missing_tenant_id")
 
     roles = _extract_roles(payload)
-    _enforce_role_exclusivity(roles)
+    _enforce_role_exclusivity(payload, roles)
 
     return AuthContext(
         user_id=user_id,
@@ -522,10 +545,9 @@ def _get_first_claim(payload: dict[str, Any], paths: str) -> Any:
 def _resolve_realm_template(payload: dict[str, Any], template: str) -> str:
     if "{realm}" not in template:
         return template
-    issuer = payload.get("iss")
-    if not isinstance(issuer, str) or "/realms/" not in issuer:
+    realm = get_issuer_realm(payload)
+    if not realm:
         return template.replace("{realm}", "")
-    realm = issuer.split("/realms/", 1)[1].split("/", 1)[0]
     return template.replace("{realm}", realm)
 
 
@@ -630,10 +652,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         request.state.auth = ctx
         jwt_tenant_token = jwt_tenant_context.set(ctx.tenant_id)
         jwt_roles_token = jwt_roles_context.set(ctx.roles)
+        jwt_platform_admin_token = jwt_platform_super_admin_context.set(is_master_realm_super_admin(ctx))
         user_token = user_context.set(ctx.user_id)
         try:
             return await call_next(request)
         finally:
             jwt_tenant_context.reset(jwt_tenant_token)
             jwt_roles_context.reset(jwt_roles_token)
+            jwt_platform_super_admin_context.reset(jwt_platform_admin_token)
             user_context.reset(user_token)

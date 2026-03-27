@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
-from app.core.auth import AuthContext, require_role
+from app.core.auth import AuthContext
+from app.core.authz import require_platform_super_admin
 from app.core.config import get_settings
 from app.db.session import get_public_session
 from app.schemas.authz.policy import AuthzPolicyRead, AuthzPolicyUpdate
@@ -34,7 +35,7 @@ def _require_provisioning_key(
 
 @router.get("/policy", response_model=AuthzPolicyRead)
 async def get_global_policy(
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):
@@ -45,7 +46,7 @@ async def get_global_policy(
 @router.put("/policy", response_model=AuthzPolicyRead)
 async def update_global_policy(
     body: AuthzPolicyUpdate,
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):
@@ -69,7 +70,7 @@ async def _resolve_tenant_uuid_by_realm(session: AsyncSession, *, realm: str) ->
 @router.get("/policy/{realm}", response_model=AuthzPolicyRead)
 async def get_realm_policy(
     realm: str,
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):
@@ -88,7 +89,7 @@ async def get_realm_policy(
 async def upsert_realm_policy(
     realm: str,
     body: AuthzPolicyUpdate,
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):
@@ -104,7 +105,7 @@ async def upsert_realm_policy(
 @router.get("/realm-policy/{realm}", response_model=AuthzPolicyRead)
 async def get_realm_policy_unlinked(
     realm: str,
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):
@@ -119,7 +120,7 @@ async def get_realm_policy_unlinked(
 async def upsert_realm_policy_unlinked(
     realm: str,
     body: AuthzPolicyUpdate,
-    _ctx: AuthContext = Depends(require_role("super_admin")),
+    _ctx: AuthContext = Depends(require_platform_super_admin()),
     _guard: None = Depends(_require_provisioning_key),
     session: AsyncSession = Depends(get_public_session),
 ):

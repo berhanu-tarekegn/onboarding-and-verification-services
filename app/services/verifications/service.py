@@ -22,6 +22,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.core.config import get_settings
 from app.core.context import get_current_tenant
@@ -967,7 +968,6 @@ async def _dispatch_temporal_resume(
 
     if not run.workflow_id:
         workflow_id = _workflow_id_for_run(run)
-        from temporalio.client import WorkflowAlreadyStartedError
         from app.temporal.workflows.verification import SubmissionVerificationWorkflow
 
         try:

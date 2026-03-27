@@ -12,11 +12,16 @@ This repo now enforces this separation:
 Use two identity layers:
 
 1. Platform admin realm
-   - usually `master`
+   - dedicated app-facing realm, for example `oaas-platform`
    - contains platform operators
    - only this realm may issue tokens with `super_admin`
 
-2. Tenant realms
+2. Keycloak admin realm
+   - usually `master`
+   - used by the provisioner service account to call the Keycloak Admin API
+   - not used for normal platform operator login
+
+3. Tenant realms
    - one realm per tenant, usually the same as `tenant_key`
    - contain tenant admins and tenant users
    - initialized by this service when a tenant is created
@@ -34,12 +39,13 @@ KEYCLOAK_BASE_URL=https://sso.example.com
 KEYCLOAK_ADMIN_BASE_URL=https://sso.example.com
 KEYCLOAK_TRUSTED_ISSUER_BASES=https://sso.example.com
 KEYCLOAK_REALMS=
+KEYCLOAK_PLATFORM_REALM=oaas-platform
 
 KEYCLOAK_TENANT_INITIALIZATION_ENABLED=true
 KEYCLOAK_TENANT_INITIALIZATION_REQUIRED=true
 KEYCLOAK_ADMIN_REALM=master
 KEYCLOAK_ADMIN_CLIENT_ID=oaas-provisioner
-KEYCLOAK_ADMIN_CLIENT_SECRET=REPLACE_ME
+KEYCLOAK_ADMIN_CLIENT_SECRET=48b446e8a7e87e2439fe3a3a0a51deb9fdc88c24705d8462
 
 KEYCLOAK_TENANT_CLIENT_ID=oaas-client
 KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL=true
@@ -54,7 +60,7 @@ KEYCLOAK_BOOTSTRAP_USERS_JSON=[
   {"username":"{realm}_maker","roles":["maker"]},
   {"username":"{realm}_checker","roles":["checker"]}
 ]
-KEYCLOAK_BOOTSTRAP_PASSWORD=ChangeMe123!
+KEYCLOAK_BOOTSTRAP_PASSWORD=35314f15d69125e4b6789d74ff26e18b
 KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN=example.com
 ```
 
@@ -67,9 +73,9 @@ Example:
 
 ```json
 {
-  "master": {
+  "oaas-platform": {
     "client_id": "oaas-admin-ui",
-    "client_secret": "REPLACE_ME"
+    "client_secret": "536302484a695aa30eab6b0e81ffb906c14a39a0801e2a53"
   }
 }
 ```
@@ -78,7 +84,23 @@ Tenant realms created by this service store their client credentials on the tena
 
 ## Step 1: Prepare the Platform Admin Realm
 
-If you use a dedicated platform realm instead of `master`, replace `master` everywhere below and set `KEYCLOAK_ADMIN_REALM` to that realm name.
+For a local Keycloak install, the simplest local start command is:
+
+```bash
+cd /path/to/keycloak
+export KC_BOOTSTRAP_ADMIN_USERNAME=admin
+export KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+bin/kc.sh start-dev --http-host=127.0.0.1 --http-port=8080
+```
+
+That starts Keycloak locally on `http://127.0.0.1:8080` with an initial admin
+user `admin/admin` on first startup.
+
+Create a dedicated platform realm such as `oaas-platform` and set:
+
+```env
+KEYCLOAK_PLATFORM_REALM=oaas-platform
+```
 
 Create these items in the platform admin realm:
 
@@ -94,10 +116,8 @@ Recommended client settings:
 
 Recommended claim mappers on the platform login client:
 
-1. Hardcoded claim `tenant_id=master`
-2. Hardcoded claim `master_claims.tenant_id=master`
-
-If your admin realm is named `platform`, use `platform_claims.tenant_id=platform` instead.
+1. Hardcoded claim `tenant_id=oaas-platform`
+2. Hardcoded claim `oaas-platform_claims.tenant_id=oaas-platform`
 
 The service reads `AUTH_TENANT_CLAIM=tenant_id,{realm}_claims.tenant_id`, so either mapper is enough. Adding both makes debugging easier.
 
@@ -115,7 +135,7 @@ The service provisions tenant realms through the Keycloak Admin API. The client 
 - `KEYCLOAK_ADMIN_CLIENT_ID`
 - `KEYCLOAK_ADMIN_CLIENT_SECRET`
 
-must have enough admin privileges in the platform admin realm.
+must have enough admin privileges in the Keycloak admin realm.
 
 Grant the provisioner service account the admin roles required to:
 
@@ -127,7 +147,11 @@ Grant the provisioner service account the admin roles required to:
 - query users
 - view realms
 
-On recent Keycloak versions this is usually done with client roles under `realm-management`.
+For `master`, the simplest local setup is to grant the service account the built-in
+realm roles `admin` and `create-realm`.
+
+For non-master realms, recent Keycloak versions usually expose the needed admin
+permissions through client roles under `realm-management`.
 
 ## Step 3: What the App Provisions for Each Tenant
 
@@ -158,19 +182,28 @@ The service no longer creates `super_admin` in tenant realms.
 Login as a platform super admin:
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:7090/api/auth/login/master" \
+curl -sS -X POST "http://127.0.0.1:7090/api/auth/login/oaas-platform" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "platform.admin",
-    "password": "REPLACE_ME"
-  }'
+    "password": "117f19dd3c2c8164c9ee2642e0da6f65"
+  }' | jq
 ```
 
 Create a tenant:
 
 ```bash
+export PLATFORM_TOKEN=$(
+  curl -sS -X POST "http://127.0.0.1:7090/api/auth/login/oaas-platform" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "username": "platform.admin",
+      "password": "117f19dd3c2c8164c9ee2642e0da6f65"
+    }' | jq -r '.access_token'
+)
+
 curl -sS -X POST "http://127.0.0.1:7090/api/v1/tenants" \
-  -H "Authorization: Bearer REPLACE_WITH_PLATFORM_TOKEN" \
+  -H "Authorization: Bearer $PLATFORM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme Bank",
@@ -194,15 +227,24 @@ curl -sS -X POST "http://127.0.0.1:7090/api/auth/login/acme_bank" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "acme_bank_tenant_admin",
-    "password": "ChangeMe123!"
+    "password": "35314f15d69125e4b6789d74ff26e18b"
   }'
 ```
 
 Inspect the resolved auth context:
 
 ```bash
+export TENANT_ADMIN_TOKEN=$(
+  curl -sS -X POST "http://127.0.0.1:7090/api/auth/login/acme_bank" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "username": "acme_bank_tenant_admin",
+      "password": "35314f15d69125e4b6789d74ff26e18b"
+    }' | jq -r '.access_token'
+)
+
 curl -sS "http://127.0.0.1:7090/api/auth/me" \
-  -H "Authorization: Bearer REPLACE_WITH_TENANT_ADMIN_TOKEN"
+  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN"
 ```
 
 You should see:
@@ -216,8 +258,10 @@ You should see:
 As the tenant admin, create a user in the same tenant realm:
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:7090/api/v1/tenants/REPLACE_WITH_TENANT_UUID/users" \
-  -H "Authorization: Bearer REPLACE_WITH_TENANT_ADMIN_TOKEN" \
+export TENANT_ID="<tenant uuid from the tenant creation response>"
+
+curl -sS -X POST "http://127.0.0.1:7090/api/v1/tenants/$TENANT_ID/users" \
+  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "national_id": "FN-12345",
@@ -289,6 +333,7 @@ Use this order for a quick demo:
 Use these roles going forward:
 
 - platform admin realm:
+  - `oaas-platform`
   - `super_admin`
 - tenant realms:
   - `tenant_admin`
@@ -301,4 +346,5 @@ Practical guidance:
 
 - use `tenant_admin` for tenant user management and tenant authz policy management
 - use `platform_admin` for tenant business administration inside the tenant schema
+- keep `master` only for Keycloak administration and the provisioner service account
 - do not assign `super_admin` in tenant realms

@@ -1,845 +1,612 @@
-# End-to-End Product Simulation
+# End-to-End Local Runbook
 
-This document is a practical runbook for:
+This is the single runbook to:
 
-- setting up the required services
-- running the API locally
-- configuring Keycloak for platform and tenant realms
-- exercising the main CRUD and workflow endpoints end to end
-- simulating both portal usage and third-party tenant service usage
+- configure the local environment
+- start all required services
+- bootstrap Keycloak
+- initialize a tenant
+- populate realistic demo data
+- run onboarding and verification
+- test the full flow
 
-## 1. Scope
+Use this together with:
 
-This repo currently supports end-to-end simulation for:
+- app env: [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env)
+- Keycloak env: [`.env.keycloak.local`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env.keycloak.local)
+- Keycloak bootstrap script: [bootstrap_keycloak_local.sh](/Users/berhanu.tarekegn/git/onboarding-and-verification/scripts/bootstrap_keycloak_local.sh)
+- demo seed script: [seed_demo_data.sh](/Users/berhanu.tarekegn/git/onboarding-and-verification/scripts/seed_demo_data.sh)
+- realistic sample data: [real_world_onboarding_sample.json](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/real_world_onboarding_sample.json)
 
-- tenant initialization
-- baseline template CRUD
-- tenant template CRUD and review
-- product CRUD and KYC config resolution
-- tenant user setup in Keycloak
-- tenant and global authz policy management
-- submission CRUD and workflow
-- verification flow execution through Temporal
-- submission search and partner-facing read APIs
-- transform rule CRUD and migration preview/apply
-
-Temporal is now part of the verification execution path for this demo.
-
-## 2. Prerequisites
+## 1. Prerequisites
 
 Install:
 
 - Docker
 - `uv`
 - `curl`
-
-Optional but helpful:
-
 - `jq`
-- `psql`
+- Temporal CLI
+- PostgreSQL locally, or Docker if you do not already have it
 
-## 3. Services You Need
+## 2. Configure Environment
 
-Minimum required:
+The repo already includes local defaults in [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env).
 
-- PostgreSQL
-- Keycloak
-- Temporal server
-- Temporal worker
-- this API
+Important values:
 
-## 4. Start PostgreSQL
+- API: `http://127.0.0.1:7090`
+- Keycloak: `http://127.0.0.1:8080`
+- Temporal gRPC: `127.0.0.1:7233`
+- Temporal UI: `http://127.0.0.1:8233`
 
-From the repo root:
-
-```bash
-docker compose -f docker-compose.dev.yaml up db temporal temporal-ui -d
-```
-
-## 5. Start Keycloak
-
-This repo does not ship a Keycloak container in `docker-compose.dev.yaml`, so start one separately:
-
-```bash
-docker run --name oaas-keycloak \
-  -p 8080:8080 \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=admin \
-  quay.io/keycloak/keycloak:26.1.0 \
-  start-dev
-```
-
-Keycloak URLs:
-
-- admin console: `http://127.0.0.1:8080`
-- default platform admin realm: `master`
-
-## 6. Configure the App
-
-Create `.env`:
+If you want an extra guard on platform initialization routes, set:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://onboarding:onboarding@localhost:5432/onboarding_db
-APP_NAME=Onboarding & Verification Service
-DEBUG=true
-API_V1_PREFIX=/api/v1
-
-AUTH_ENABLED=true
-AUTH_TENANT_CLAIM=tenant_id,{realm}_claims.tenant_id
-AUTH_ALGORITHMS=RS256
-AUTH_AUDIENCE=
-AUTH_ISSUERS=
-AUTH_EXCLUSIVE_ROLE_GROUPS=maker|checker
-
-KEYCLOAK_BASE_URL=http://127.0.0.1:8080
-KEYCLOAK_ADMIN_BASE_URL=http://127.0.0.1:8080
-KEYCLOAK_TRUSTED_ISSUER_BASES=http://127.0.0.1:8080
-KEYCLOAK_REALMS=
-
-KEYCLOAK_TENANT_INITIALIZATION_ENABLED=true
-KEYCLOAK_TENANT_INITIALIZATION_REQUIRED=true
-KEYCLOAK_ADMIN_REALM=master
-KEYCLOAK_ADMIN_CLIENT_ID=oaas-provisioner
-KEYCLOAK_ADMIN_CLIENT_SECRET=REPLACE_ME
-
-KEYCLOAK_TENANT_CLIENT_ID=oaas-client
-KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL=true
-
-KEYCLOAK_CLIENTS_JSON={"master":{"client_id":"oaas-admin-ui","client_secret":"change-me-admin-ui-secret"}}
-
-KEYCLOAK_BOOTSTRAP_USERS_JSON=[{"username":"{realm}_tenant_admin","roles":["tenant_admin"]},{"username":"{realm}_maker","roles":["maker"]},{"username":"{realm}_checker","roles":["checker"]}]
-KEYCLOAK_BOOTSTRAP_PASSWORD=ChangeMe123!
-KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN=example.com
-
-PLATFORM_INITIALIZATION_API_KEY=
-TEMPORAL_HOST=127.0.0.1:7233
-TEMPORAL_HOST_DOCKER=temporal:7233
-TEMPORAL_NAMESPACE=default
-TEMPORAL_TASK_QUEUE=onboarding-task-queue
-TEMPORAL_ENABLED=true
-TEMPORAL_REQUIRED=false
+PLATFORM_INITIALIZATION_API_KEY=local-init-key
 ```
 
-Important:
-
-- create the Keycloak provisioner client and platform `super_admin` user as described in [keycloak_tenant_realm_setup.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/keycloak_tenant_realm_setup.md)
-- if you set `PLATFORM_INITIALIZATION_API_KEY`, include `X-Initialization-Key` on tenant create/delete and global authz policy calls
-
-## 7. Install Dependencies and Run Migrations
+Then use:
 
 ```bash
-uv sync
-uv run alembic upgrade head
+export INITIALIZATION_HEADER='-H X-Initialization-Key:local-init-key'
 ```
 
-## 8. Start the API
-
-```bash
-uv run uvicorn app.main:app --reload --port 7090
-```
-
-Start the Temporal worker in a second terminal:
-
-```bash
-uv run python -m app.temporal.worker
-```
-
-Smoke test:
-
-```bash
-curl -sS http://127.0.0.1:7090/health
-curl -sS http://127.0.0.1:7090/docs
-```
-
-Optional Temporal UI:
-
-```bash
-open http://127.0.0.1:8233
-```
-
-## 9. Demo Shell Variables
-
-Use these shell variables during the walkthrough:
-
-```bash
-export BASE_URL=http://127.0.0.1:7090
-export PLATFORM_REALM=master
-export TENANT_KEY=acme_bank
-export TENANT_NAME="Acme Bank"
-export PLATFORM_USERNAME=platform.admin
-export PLATFORM_PASSWORD=REPLACE_ME
-export TENANT_ADMIN_USERNAME=${TENANT_KEY}_tenant_admin
-export TENANT_ADMIN_PASSWORD=ChangeMe123!
-```
-
-If you use the optional initialization key:
-
-```bash
-export INITIALIZATION_HEADER="-H X-Initialization-Key:REPLACE_ME"
-```
-
-If you do not use it:
+If you leave it empty:
 
 ```bash
 export INITIALIZATION_HEADER=
 ```
 
-## 10. Platform Auth
+## 3. Start Keycloak
 
-Login as platform super admin:
+From the repo root:
+
+For a local Keycloak install:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/auth/login/$PLATFORM_REALM" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"$PLATFORM_USERNAME\",
-    \"password\": \"$PLATFORM_PASSWORD\"
-  }"
+cd /path/to/keycloak
+export KC_BOOTSTRAP_ADMIN_USERNAME=admin
+export KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+bin/kc.sh start-dev --http-host=127.0.0.1 --http-port=8080
 ```
 
-Save the returned `access_token` as `PLATFORM_TOKEN`.
+For Docker Keycloak instead:
 
-Check the resolved auth context:
+```bash
+cd /Users/berhanu.tarekegn/git/onboarding-and-verification
+docker compose -f docker-compose.dev.yaml up keycloak -d
+```
+
+This stack exposes:
+
+- Keycloak: `http://127.0.0.1:8080`
+
+If you do not already have PostgreSQL running locally, start it separately:
+
+```bash
+docker compose -f docker-compose.dev.yaml up db -d
+```
+
+## 4. Start Temporal Locally
+
+Install the Temporal CLI locally if needed:
+
+```bash
+brew install temporal
+```
+
+Start the local Temporal dev server in its own terminal:
+
+```bash
+chmod +x scripts/start_temporal_local.sh
+./scripts/start_temporal_local.sh
+```
+
+That gives you:
+
+- Temporal gRPC: `127.0.0.1:7233`
+- Temporal UI: `http://127.0.0.1:8233`
+
+If you previously started Docker Temporal services and the UI showed `500 Internal Error`, stop those containers and use the local CLI server instead:
+
+```bash
+docker compose -f docker-compose.dev.yaml stop temporal temporal-ui
+```
+
+## 5. Bootstrap Keycloak
+
+In a second terminal:
+
+```bash
+cd /Users/berhanu.tarekegn/git/onboarding-and-verification
+chmod +x scripts/bootstrap_keycloak_local.sh
+./scripts/bootstrap_keycloak_local.sh
+```
+
+If you started a local Keycloak install, point the bootstrap script at it:
+
+```bash
+cd /Users/berhanu.tarekegn/git/onboarding-and-verification
+export KEYCLOAK_HOME=/path/to/keycloak
+./scripts/bootstrap_keycloak_local.sh
+```
+
+That script creates:
+
+- realm `oaas-platform`
+- realm role `super_admin` in `oaas-platform`
+- login client `oaas-admin-ui` in `oaas-platform`
+- provisioner client `oaas-provisioner` in `master`
+- required hardcoded tenant claim mappers
+- platform admin user `platform.admin`
+
+The script now verifies that `service-account-oaas-provisioner` has the required
+admin roles in the Keycloak admin realm. If bootstrap succeeds, tenant realm
+initialization is allowed to create new realms.
+
+Default credentials created by the script:
+
+- platform admin username: `platform.admin`
+- platform admin password: `117f19dd3c2c8164c9ee2642e0da6f65`
+
+## 6. Start the App
+
+In another terminal:
+
+```bash
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 7090
+```
+
+In another terminal, start the Temporal worker:
+
+```bash
+uv run python -m app.temporal.worker
+```
+
+Temporal must stay enabled in [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env):
+
+```env
+TEMPORAL_ENABLED=true
+TEMPORAL_REQUIRED=false
+```
+
+Smoke test:
+
+```bash
+curl -sS http://127.0.0.1:7090/health | jq
+curl -sS http://127.0.0.1:7090/docs >/dev/null
+```
+
+## 7. Load Demo Variables
+
+If you are using the current local no-auth mode from [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env), you can skip the token flow entirely and seed the sample data with:
+
+```bash
+chmod +x scripts/seed_demo_data.sh
+./scripts/seed_demo_data.sh
+```
+
+The remaining sections below are still useful when you want to exercise the full auth-enabled path.
+
+Use the realistic sample data file to set local shell variables:
+
+```bash
+export BASE_URL=http://127.0.0.1:7090
+export SAMPLE_JSON=/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/real_world_onboarding_sample.json
+
+export PLATFORM_REALM=$(jq -r '.platform_admin.realm' "$SAMPLE_JSON")
+export PLATFORM_USERNAME=$(jq -r '.platform_admin.username' "$SAMPLE_JSON")
+export PLATFORM_PASSWORD=$(jq -r '.platform_admin.password' "$SAMPLE_JSON")
+
+export TENANT_KEY=$(jq -r '.tenant.tenant_key' "$SAMPLE_JSON")
+export TENANT_NAME=$(jq -r '.tenant.name' "$SAMPLE_JSON")
+export TENANT_ADMIN_USERNAME=$(jq -r '.tenant_bootstrap_admin.username' "$SAMPLE_JSON")
+export TENANT_ADMIN_PASSWORD=$(jq -r '.tenant_bootstrap_admin.password' "$SAMPLE_JSON")
+```
+
+## 8. Get Platform Token
+
+```bash
+export PLATFORM_TOKEN=$(
+  curl -sS -X POST "$BASE_URL/api/auth/login/$PLATFORM_REALM" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"username\": \"$PLATFORM_USERNAME\",
+      \"password\": \"$PLATFORM_PASSWORD\"
+    }" | jq -r '.access_token'
+)
+```
+
+Verify:
 
 ```bash
 curl -sS "$BASE_URL/api/auth/me" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN"
+  -H "Authorization: Bearer $PLATFORM_TOKEN" | jq
 ```
 
-## 11. Tenant CRUD
+## 9. Initialize the Tenant
 
-### Create tenant
+Create the tenant from the sample file:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/tenants" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  -H "Content-Type: application/json" \
-  $INITIALIZATION_HEADER \
-  -d "{
-    \"name\": \"$TENANT_NAME\",
-    \"tenant_key\": \"$TENANT_KEY\"
-  }"
+export TENANT_PAYLOAD=$(jq -c '.tenant' "$SAMPLE_JSON")
+
+export TENANT_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/tenants" \
+    -H "Authorization: Bearer $PLATFORM_TOKEN" \
+    -H "Content-Type: application/json" \
+    $INITIALIZATION_HEADER \
+    -d "$TENANT_PAYLOAD"
+)
+
+echo "$TENANT_RESPONSE" | jq
+export TENANT_ID=$(echo "$TENANT_RESPONSE" | jq -r '.id')
 ```
 
-Save:
+Expected:
 
-- `TENANT_ID`
-- `TENANT_REALM`
+- tenant row created in `public.tenants`
+- PostgreSQL schema `tenant_abyssinia_corp`
+- Keycloak realm `abyssinia_corp`
+- bootstrap tenant users created
 
-### List tenants
+## 10. Login as Tenant Admin
 
 ```bash
-curl -sS "$BASE_URL/api/v1/tenants" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN"
+export TENANT_TOKEN=$(
+  curl -sS -X POST "$BASE_URL/api/auth/login/$TENANT_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"username\": \"$TENANT_ADMIN_USERNAME\",
+      \"password\": \"$TENANT_ADMIN_PASSWORD\"
+    }" | jq -r '.access_token'
+)
 ```
 
-### Get tenant
-
-```bash
-curl -sS "$BASE_URL/api/v1/tenants/$TENANT_ID" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN"
-```
-
-### Update tenant
-
-```bash
-curl -sS -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Acme Bank PLC"}'
-```
-
-## 12. Baseline Template CRUD
-
-Create a baseline template with an initial version:
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/baseline-templates" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "KYC Level 1",
-    "description": "Standard baseline",
-    "category": "kyc",
-    "template_type": "kyc",
-    "level": 1,
-    "initial_version": {
-      "version_tag": "1.0.0",
-      "rules_config": {},
-      "changelog": "Initial baseline",
-      "question_groups": [
-        {
-          "unique_key": "personal_info",
-          "title": "Personal Information",
-          "display_order": 1,
-          "questions": [
-            {"unique_key": "first_name", "label": "First Name", "field_type": "text", "required": true, "display_order": 1},
-            {"unique_key": "last_name", "label": "Last Name", "field_type": "text", "required": true, "display_order": 2},
-            {"unique_key": "national_id", "label": "National ID", "field_type": "text", "required": true, "display_order": 3},
-            {"unique_key": "phone_number", "label": "Phone Number", "field_type": "text", "required": true, "display_order": 4}
-          ]
-        }
-      ],
-      "questions": []
-    }
-  }'
-```
-
-Save `BASELINE_TEMPLATE_ID`.
-
-Other baseline CRUD:
-
-```bash
-curl -sS "$BASE_URL/api/v1/baseline-templates" -H "Authorization: Bearer $PLATFORM_TOKEN"
-curl -sS "$BASE_URL/api/v1/baseline-templates/$BASELINE_TEMPLATE_ID" -H "Authorization: Bearer $PLATFORM_TOKEN"
-curl -sS -X PATCH "$BASE_URL/api/v1/baseline-templates/$BASELINE_TEMPLATE_ID" -H "Authorization: Bearer $PLATFORM_TOKEN" -H "Content-Type: application/json" -d '{"description":"Updated baseline"}'
-```
-
-Create and publish another baseline version:
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/baseline-templates/$BASELINE_TEMPLATE_ID/definitions" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"version_tag":"1.1.0","rules_config":{},"changelog":"Revision"}'
-```
-
-Save `BASELINE_VERSION_ID`, then:
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/baseline-templates/$BASELINE_TEMPLATE_ID/definitions/$BASELINE_VERSION_ID/publish?set_as_active=true" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN"
-```
-
-## 13. Tenant Auth
-
-Login as tenant admin from the tenant realm:
-
-```bash
-curl -sS -X POST "$BASE_URL/api/auth/login/$TENANT_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"$TENANT_ADMIN_USERNAME\",
-    \"password\": \"$TENANT_ADMIN_PASSWORD\"
-  }"
-```
-
-Save `TENANT_ADMIN_TOKEN`.
-
-Inspect tenant auth:
+Verify:
 
 ```bash
 curl -sS "$BASE_URL/api/auth/me" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN"
+  -H "Authorization: Bearer $TENANT_TOKEN" | jq
 ```
 
-## 14. Tenant Template CRUD
+## 11. Create a Baseline Template
 
-### Create tenant template
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Acme Retail KYC",
-    "description": "Tenant onboarding template",
-    "template_type": "kyc",
-    "baseline_level": 1
-  }'
-```
-
-Save `TENANT_TEMPLATE_ID`.
-
-### List and get tenant templates
+Create a minimal baseline template:
 
 ```bash
-curl -sS "$BASE_URL/api/v1/templates" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-```
-
-### Create tenant template definition with verification and search config
-
-Use the rules config from:
-
-- [verification_flow_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/verification_flow_demo.md)
-- [submission_search_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/submission_search_demo.md)
-
-Example:
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "version_tag": "1.0.0",
-    "changelog": "Initial tenant onboarding flow",
-    "rules_config": {
-      "submission_search": {
-        "filters": [
-          {"key":"national_id","label":"National ID","source":"form_data","path":"national_id","operators":["eq","contains"]},
-          {"key":"name_match_score","label":"Name Match Score","source":"verification","path":"steps.name_match.result.score","operators":["gte","lte"]}
-        ]
-      },
-      "verification_flow": {
-        "flow_key": "default",
-        "demo_registry": {
-          "FN-123": {
-            "otp_code": "222222",
-            "registered_phone": "+251900000002",
-            "first_name": "Abel",
-            "last_name": "Bekele",
-            "date_of_birth": "1990-01-01"
+export BASELINE_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/baseline-templates" \
+    -H "Authorization: Bearer $PLATFORM_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Retail KYC Baseline",
+      "description": "Baseline for account onboarding",
+      "category": "kyc",
+      "template_type": "kyc",
+      "level": 1,
+      "initial_version": {
+        "version_tag": "1.0.0",
+        "rules_config": {},
+        "changelog": "Initial baseline",
+        "question_groups": [
+          {
+            "unique_key": "identity",
+            "title": "Identity",
+            "display_order": 1,
+            "questions": [
+              {"unique_key":"first_name","label":"First Name","field_type":"text","required":true,"display_order":1},
+              {"unique_key":"last_name","label":"Last Name","field_type":"text","required":true,"display_order":2},
+              {"unique_key":"national_id","label":"National ID","field_type":"text","required":true,"display_order":3},
+              {"unique_key":"phone_number","label":"Phone Number","field_type":"text","required":true,"display_order":4}
+            ]
           }
-        },
-        "steps": [
-          {"key":"phone_otp","name":"Phone OTP","type":"challenge_response","adapter":"demo_phone_otp","input":{"phone_number":"$answers.phone_number"},"demo_code":"111111","max_attempts":3},
-          {"key":"fayda_lookup","name":"Fayda OTP","type":"challenge_response","adapter":"demo_fayda_otp","depends_on":["phone_otp"],"input":{"national_id":"$answers.national_id"},"max_attempts":3},
-          {"key":"name_match","name":"Name Match","type":"comparison","adapter":"demo_fuzzy_match","depends_on":["fayda_lookup"],"pairs":[
-            {"label":"First Name","left":"$answers.first_name","right":"$steps.fayda_lookup.result.attributes.first_name"},
-            {"label":"Last Name","left":"$answers.last_name","right":"$steps.fayda_lookup.result.attributes.last_name"}
-          ],"pass_score_gte":0.95,"review_score_gte":0.8}
-        ],
-        "decision": {
-          "rules": [
-            {"decision":"approved","kyc_level":"level_2","all":[
-              {"fact":"steps.phone_otp.outcome","equals":"pass"},
-              {"fact":"steps.fayda_lookup.outcome","equals":"pass"},
-              {"fact":"steps.name_match.result.score","gte":0.95}
-            ],"reason_codes":["all_checks_passed"]}
-          ],
-          "fallback": {"decision":"manual_review","kyc_level":"level_1","reason_codes":["verification_pending"]}
-        }
+        ]
       }
-    }
-  }'
+    }'
+)
+
+echo "$BASELINE_RESPONSE" | jq
+export BASELINE_TEMPLATE_ID=$(echo "$BASELINE_RESPONSE" | jq -r '.id')
 ```
 
-Save `TENANT_TEMPLATE_VERSION_ID`.
+## 12. Create the Tenant Template
 
-### Update and publish definition
+Create the tenant template:
 
 ```bash
-curl -sS -X PATCH "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions/$TENANT_TEMPLATE_VERSION_ID" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+export TENANT_TEMPLATE_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/templates" \
+    -H "Authorization: Bearer $TENANT_TOKEN" \
+    -H "X-Tenant-ID: $TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Abyssinia Retail Onboarding",
+      "template_type": "kyc",
+      "baseline_level": 1
+    }'
+)
+
+echo "$TENANT_TEMPLATE_RESPONSE" | jq
+export TENANT_TEMPLATE_ID=$(echo "$TENANT_TEMPLATE_RESPONSE" | jq -r '.id')
+```
+
+Create the tenant template definition using the realistic `rules_config` from the sample file:
+
+```bash
+export RULES_CONFIG=$(jq -c '.template_version.rules_config' "$SAMPLE_JSON")
+export CHANGELOG=$(jq -r '.template_version.changelog' "$SAMPLE_JSON")
+export VERSION_TAG=$(jq -r '.template_version.version_tag' "$SAMPLE_JSON")
+
+export TEMPLATE_DEFINITION_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions" \
+    -H "Authorization: Bearer $TENANT_TOKEN" \
+    -H "X-Tenant-ID: $TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"version_tag\": \"$VERSION_TAG\",
+      \"rules_config\": $RULES_CONFIG,
+      \"changelog\": \"$CHANGELOG\"
+    }"
+)
+
+echo "$TEMPLATE_DEFINITION_RESPONSE" | jq
+export TENANT_TEMPLATE_VERSION_ID=$(echo "$TEMPLATE_DEFINITION_RESPONSE" | jq -r '.id')
+```
+
+## 13. Create the Product
+
+```bash
+export PRODUCT_PAYLOAD=$(jq -c '.product' "$SAMPLE_JSON")
+
+export PRODUCT_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/products" \
+    -H "Authorization: Bearer $TENANT_TOKEN" \
+    -H "X-Tenant-ID: $TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d "$PRODUCT_PAYLOAD"
+)
+
+echo "$PRODUCT_RESPONSE" | jq
+export PRODUCT_ID=$(echo "$PRODUCT_RESPONSE" | jq -r '.id')
+```
+
+Activate the product:
+
+```bash
+curl -sS -X PATCH "$BASE_URL/api/v1/products/$PRODUCT_ID" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d '{"changelog":"Updated before publish"}'
-
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions/$TENANT_TEMPLATE_VERSION_ID/publish?set_as_active=true" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
+  -d '{"status":"active"}' | jq
 ```
 
-### Optional review flow
+## 14. Create Realistic Demo Submissions
 
-Submit for review:
+### Self-service customer
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions/$TENANT_TEMPLATE_VERSION_ID/submit-review" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+export SELF_SUBMISSION_PAYLOAD=$(
+  jq -c --arg template_id "$TENANT_TEMPLATE_ID" --arg product_id "$PRODUCT_ID" '
+    .submissions[0] + {template_id:$template_id, product_id:$product_id}
+  ' "$SAMPLE_JSON"
+)
+
+export SELF_SUBMISSION_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/submissions" \
+    -H "Authorization: Bearer $TENANT_TOKEN" \
+    -H "X-Tenant-ID: $TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d "$SELF_SUBMISSION_PAYLOAD"
+)
+
+echo "$SELF_SUBMISSION_RESPONSE" | jq
+export SELF_SUBMISSION_ID=$(echo "$SELF_SUBMISSION_RESPONSE" | jq -r '.id')
+```
+
+### Agent-assisted deferred customer
+
+```bash
+export OFFLINE_SUBMISSION_PAYLOAD=$(
+  jq -c --arg template_id "$TENANT_TEMPLATE_ID" --arg product_id "$PRODUCT_ID" '
+    .submissions[1] + {template_id:$template_id, product_id:$product_id}
+  ' "$SAMPLE_JSON"
+)
+
+export OFFLINE_SUBMISSION_RESPONSE=$(
+  curl -sS -X POST "$BASE_URL/api/v1/submissions" \
+    -H "Authorization: Bearer $TENANT_TOKEN" \
+    -H "X-Tenant-ID: $TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d "$OFFLINE_SUBMISSION_PAYLOAD"
+)
+
+echo "$OFFLINE_SUBMISSION_RESPONSE" | jq
+export OFFLINE_SUBMISSION_ID=$(echo "$OFFLINE_SUBMISSION_RESPONSE" | jq -r '.id')
+```
+
+## 15. Run Verification
+
+### Self-service flow
+
+Start verification:
+
+```bash
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$SELF_SUBMISSION_ID/verification/start" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d '{"notes":"Ready for approval"}'
+  -d '{"journey":"self_service_online","deferred":false}' | jq
 ```
 
-Approve as platform super admin:
+Submit phone OTP:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions/$TENANT_TEMPLATE_VERSION_ID/approve" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$SELF_SUBMISSION_ID/verification/steps/phone_otp/actions" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d '{"notes":"Approved"}'
+  -d '{"action":"submit_code","payload":{"otp_code":"111111"}}' | jq
 ```
 
-## 15. Product CRUD
-
-### Create product
+Submit Fayda OTP:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/products" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$SELF_SUBMISSION_ID/verification/steps/fayda_lookup/actions" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"name\": \"Retail Account\",
-    \"description\": \"Retail onboarding\",
-    \"product_code\": \"RA-001\",
-    \"template_id\": \"$TENANT_TEMPLATE_ID\"
-  }"
+  -d '{"action":"submit_code","payload":{"otp_code":"222222"}}' | jq
 ```
 
-Save `PRODUCT_ID`.
+### Agent-assisted deferred flow
 
-Other product flows:
-
-```bash
-curl -sS "$BASE_URL/api/v1/products" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/products/$PRODUCT_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X PATCH "$BASE_URL/api/v1/products/$PRODUCT_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID" -H "Content-Type: application/json" -d '{"description":"Updated product"}'
-curl -sS -X POST "$BASE_URL/api/v1/products/$PRODUCT_ID/activate" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/products/$PRODUCT_ID/kyc-config" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X POST "$BASE_URL/api/v1/products/$PRODUCT_ID/deactivate" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-```
-
-## 16. Tenant Users and Tenant Policy
-
-### Create tenant users
+Create deferred verification:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/users" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "national_id": "FN-456",
-    "username": "maker.one",
-    "password": "Passw0rd!",
-    "roles": ["maker"],
-    "first_name": "Maker",
-    "last_name": "One",
-    "phone_number": "+251900000003"
-  }'
-```
-
-### Get and update tenant authz policy
-
-```bash
-curl -sS "$BASE_URL/api/v1/tenants/$TENANT_ID/authz/policy" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN"
-
-curl -sS -X PUT "$BASE_URL/api/v1/tenants/$TENANT_ID/authz/policy" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "policy": {
-      "mode": "merge",
-      "roles": {
-        "tenant_admin": ["templates.read","templates.update","products.read","products.update","submissions.read_all","submissions.comment"],
-        "maker": ["submissions.create","submissions.read","submissions.update","submissions.submit"]
-      },
-      "columns": {}
-    }
-  }'
-```
-
-## 17. Global and Realm Authz Policy
-
-These are platform-only endpoints.
-
-```bash
-curl -sS "$BASE_URL/api/v1/authz/policy" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  $INITIALIZATION_HEADER
-
-curl -sS -X PUT "$BASE_URL/api/v1/authz/policy" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  -H "Content-Type: application/json" \
-  $INITIALIZATION_HEADER \
-  -d '{
-    "policy": {
-      "mode": "merge",
-      "roles": {
-        "schema_author": ["baseline_templates.read","baseline_templates.create","baseline_templates.update","baseline_templates.publish"]
-      },
-      "columns": {}
-    }
-  }'
-
-curl -sS "$BASE_URL/api/v1/authz/policy/$TENANT_KEY" \
-  -H "Authorization: Bearer $PLATFORM_TOKEN" \
-  $INITIALIZATION_HEADER
-```
-
-## 18. Submission CRUD and Workflow
-
-### Create submission
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/submissions" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$OFFLINE_SUBMISSION_ID/verification/start" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"template_id\": \"$TENANT_TEMPLATE_ID\",
-    \"product_id\": \"$PRODUCT_ID\",
-    \"submitter_id\": \"customer-001\",
-    \"external_ref\": \"EXT-001\",
-    \"form_data\": {
-      \"phone_number\": \"+251900000001\",
-      \"national_id\": \"FN-123\",
-      \"first_name\": \"Abel\",
-      \"last_name\": \"Bekele\"
-    }
-  }"
+  -d '{"journey":"agent_assisted_offline","deferred":true}' | jq
 ```
 
-Save `SUBMISSION_ID`.
-
-### List, get, update
+Resume later:
 
 ```bash
-curl -sS "$BASE_URL/api/v1/submissions" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/full" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X PATCH "$BASE_URL/api/v1/submissions/$SUBMISSION_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID" -H "Content-Type: application/json" -d '{"submitter_id":"customer-001-updated"}'
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$OFFLINE_SUBMISSION_ID/verification/start" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"journey":"self_service_online","deferred":false}' | jq
 ```
 
-### Submit and transition
+Complete OTPs:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/submit?validate=false" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/transition" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$OFFLINE_SUBMISSION_ID/verification/steps/phone_otp/actions" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d '{"to_status":"under_review","reason":"Start review"}'
+  -d '{"action":"submit_code","payload":{"otp_code":"111111"}}' | jq
+
+curl -sS -X POST "$BASE_URL/api/v1/submissions/$OFFLINE_SUBMISSION_ID/verification/steps/fayda_lookup/actions" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"submit_code","payload":{"otp_code":"333333"}}' | jq
 ```
 
-### Comments and history
+## 16. Inspect Results
+
+Get both submission full views:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/comments" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"content":"Looks good so far","is_internal":true}'
+curl -sS "$BASE_URL/api/v1/submissions/$SELF_SUBMISSION_ID/full" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
 
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/comments" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/history" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
+curl -sS "$BASE_URL/api/v1/submissions/$OFFLINE_SUBMISSION_ID/full" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
 ```
 
-## 19. Verification Flow
+What to look for:
 
-See the detailed demo in [verification_flow_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/verification_flow_demo.md).
+- `verification.workflow_id`
+- `verification.status`
+- `verification.decision`
+- `verification.kyc_level`
+- `computed_data.verification`
+- `validation_results.decision`
 
-Quick flow:
+## 17. Test Search
 
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/verification/start" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"journey":"self_service_online","deferred":false}'
-
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/verification/steps/phone_otp/actions" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"submit_code","payload":{"otp_code":"111111"}}'
-
-curl -sS -X POST "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/verification/steps/fayda_lookup/actions" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"submit_code","payload":{"otp_code":"222222"}}'
-
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/verification" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-```
-
-Expected behavior:
-
-- the start call creates or resumes a Temporal workflow for the verification run
-- the first response should include `workflow_id`
-- the run moves to `waiting_user_action` while OTP input is outstanding
-- each action call signals the same workflow instead of re-running the full flow inline in the API process
-
-## 20. Submission Search for Portal and Partners
-
-See [submission_search_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/submission_search_demo.md).
-
-### Discover filter catalog
+Get the tenant search config:
 
 ```bash
 curl -sS "$BASE_URL/api/v1/submissions/search-config" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" | jq
 ```
 
-### Search submissions
+Search approved submissions:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/v1/submissions/search" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "verification_decision": "approved",
     "criteria": [
-      {"key":"national_id","op":"eq","value":"FN-123"},
+      {"key":"national_id","op":"contains","value":"FID-ETH"},
       {"key":"name_match_score","op":"gte","value":0.95}
     ],
-    "sort_by": "created_at",
-    "sort_order": "desc",
     "limit": 25
-  }'
+  }' | jq
 ```
 
-## 21. Third-Party Tenant Service Simulation
+## 18. Test Machine-to-Machine Access
 
-Get a machine token:
+Get a tenant service token:
 
 ```bash
-curl -sS -X POST "$BASE_URL/api/auth/service-token/$TENANT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"scope":"submissions.read"}'
+export SERVICE_TOKEN=$(
+  curl -sS -X POST "$BASE_URL/api/auth/service-token/$TENANT_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"scope":"submissions.read"}' | jq -r '.access_token'
+)
 ```
 
-Save `SERVICE_TOKEN`.
-
-Use it against search APIs:
+Use it for partner search:
 
 ```bash
-curl -sS "$BASE_URL/api/v1/submissions/search-config" \
-  -H "Authorization: Bearer $SERVICE_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-
 curl -sS -X POST "$BASE_URL/api/v1/submissions/search" \
   -H "Authorization: Bearer $SERVICE_TOKEN" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
-  -d '{"verification_decision":"approved","limit":10}'
+  -d '{"verification_decision":"approved","limit":10}' | jq
 ```
 
-## 22. Transform Rule CRUD and Migration
+## 19. What Counts as Success
 
-To simulate template version migration:
+You have a valid end-to-end demo when:
 
-1. create another tenant template version
-2. publish it
-3. create or generate transform rules between old and new versions
+- Keycloak login works for platform admin and tenant admin
+- tenant initialization creates the tenant schema and tenant realm
+- the API starts cleanly
+- the Temporal worker stays connected
+- verification start returns a `workflow_id`
+- both sample submissions end with:
+  - `decision=approved`
+  - `kyc_level=level_2`
+- submission search returns the verified records
+- partner service-token search also returns the verified records
 
-### Create a second template version
+## 20. Troubleshooting
 
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/definitions" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"version_tag":"2.0.0","rules_config":{},"changelog":"Next version"}'
-```
+If tenant creation fails:
 
-Save `TENANT_TEMPLATE_VERSION_V2_ID`.
+- confirm Keycloak bootstrap ran successfully
+- confirm `KEYCLOAK_ADMIN_CLIENT_SECRET` in [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env) matches the provisioner client secret created in Keycloak
 
-### Generate transform rules
+If verification stays inline or does not get `workflow_id`:
 
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/generate" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"source_version_id\": \"$TENANT_TEMPLATE_VERSION_ID\",
-    \"target_version_id\": \"$TENANT_TEMPLATE_VERSION_V2_ID\",
-    \"changelog\": \"Auto-generated migration\"
-  }"
-```
+- confirm `TEMPORAL_ENABLED=true`
+- confirm the worker is running
+- confirm Temporal is reachable at `127.0.0.1:7233`
 
-Save `RULE_SET_ID`.
+If tenant admin login fails:
 
-### Transform CRUD
+- confirm bootstrap users were enabled in [`.env`](/Users/berhanu.tarekegn/git/onboarding-and-verification/.env)
+- confirm the tenant realm was created in Keycloak
 
-```bash
-curl -sS "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X PATCH "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID" -H "Content-Type: application/json" -d '{"changelog":"Edited migration notes"}'
-```
+If search returns nothing:
 
-### Add a manual rule
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID/rules" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source_unique_key": "first_name",
-    "target_unique_key": "first_name",
-    "operation": "copy",
-    "params": {},
-    "display_order": 1,
-    "is_required": true
-  }'
-```
-
-### Preview, publish, apply, history
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID/preview" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d "{\"submission_id\":\"$SUBMISSION_ID\"}"
-
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID/publish" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID/apply/$SUBMISSION_ID" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-
-curl -sS "$BASE_URL/api/v1/submissions/$SUBMISSION_ID/transform-history" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID"
-```
-
-### Bulk migrate
-
-```bash
-curl -sS -X POST "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID/transform-rules/$RULE_SET_ID/bulk-apply" \
-  -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" \
-  -H "X-Tenant-ID: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"dry_run":true}'
-```
-
-## 23. Cleanup
-
-Delete draft-only entities where needed:
-
-```bash
-curl -sS -X DELETE "$BASE_URL/api/v1/products/$PRODUCT_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X DELETE "$BASE_URL/api/v1/templates/$TENANT_TEMPLATE_ID" -H "Authorization: Bearer $TENANT_ADMIN_TOKEN" -H "X-Tenant-ID: $TENANT_ID"
-curl -sS -X DELETE "$BASE_URL/api/v1/tenants/$TENANT_ID?hard_delete=true" -H "Authorization: Bearer $PLATFORM_TOKEN" $INITIALIZATION_HEADER
-```
-
-## 24. Recommended Demo Order
-
-For a clean full product walkthrough, run the steps in this order:
-
-1. start PostgreSQL, Keycloak, and the API
-2. create platform admin setup in Keycloak
-3. login as platform super admin
-4. create tenant
-5. login as tenant admin
-6. create baseline template
-7. create and publish tenant template definition with verification and search config
-8. create product and activate it
-9. create tenant users
-10. create submission
-11. run verification
-12. search the submission from portal style API
-13. search the submission using a machine token
-14. create a new template version and preview a transform
-
-## 25. Useful References
-
-- Keycloak platform and tenant realm setup:
-  [keycloak_tenant_realm_setup.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/keycloak_tenant_realm_setup.md)
-- Verification demo:
-  [verification_flow_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/verification_flow_demo.md)
-- Submission search demo:
-  [submission_search_demo.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/submission_search_demo.md)
+- inspect the submission full view first
+- confirm `verification.decision=approved`
+- confirm the sample rules config was applied to the tenant template definition

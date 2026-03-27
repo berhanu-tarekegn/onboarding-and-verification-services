@@ -13,6 +13,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import Column, Text, UniqueConstraint
 from sqlmodel import Field, JSON
 from uuid_extensions import uuid7
@@ -68,10 +69,11 @@ class VerificationRun(TenantSchemaModel, table=True):
     started_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False,
+        sa_type=sa.DateTime(timezone=True),
         description="UTC timestamp for the first time the flow was started.",
     )
-    completed_at: Optional[datetime] = Field(default=None)
-    deferred_until: Optional[datetime] = Field(default=None)
+    completed_at: Optional[datetime] = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    deferred_until: Optional[datetime] = Field(default=None, sa_type=sa.DateTime(timezone=True))
 
 
 class VerificationStepRun(TenantSchemaModel, table=True):
@@ -123,6 +125,6 @@ class VerificationStepRun(TenantSchemaModel, table=True):
     action_schema: Dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     error_details: Dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
-    started_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
-    expires_at: Optional[datetime] = Field(default=None)
+    started_at: Optional[datetime] = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    completed_at: Optional[datetime] = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    expires_at: Optional[datetime] = Field(default=None, sa_type=sa.DateTime(timezone=True))

@@ -22,10 +22,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:7090", help="API base URL (default: http://127.0.0.1:7090)")
     parser.add_argument("--realm", default="demo", help="Keycloak realm (default: demo)")
     parser.add_argument("--client", default="mobile", help="Client alias query param (default: mobile)")
-    parser.add_argument("--tenant", default="demo", help="Tenant identifier for X-Tenant-ID header (default: demo)")
+    parser.add_argument("--tenant", default="demo", help="Tenant key for X-Tenant-ID header (default: demo)")
     parser.add_argument("--username", default="demo_super_admin", help="Login username (default: demo_super_admin)")
     parser.add_argument("--password", default="test123", help="Login password (default: test123)")
-    parser.add_argument("--provisioning-key", default="", help="Optional X-Provisioning-Key value")
+    parser.add_argument("--initialization-key", default="", help="Optional X-Initialization-Key value")
     args = parser.parse_args(argv)
 
     env = {
@@ -41,7 +41,7 @@ def main(argv: list[str]) -> int:
             tenant=args.tenant,
             username=args.username,
             password=args.password,
-            provisioning_key=args.provisioning_key,
+            initialization_key=args.initialization_key,
             access_token="",
             refresh_token="",
         ),
@@ -54,4 +54,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

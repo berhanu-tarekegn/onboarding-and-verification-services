@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from uuid import UUID
 
-from app.core.auth import AuthContext, is_master_realm_super_admin, require_role
+from app.core.auth import AuthContext, is_platform_realm_super_admin, require_role
 from app.core.config import get_settings
 from app.models.public.authz_policy import AuthzPolicy
 
@@ -502,7 +502,7 @@ def _merge_role_columns(
 
 
 def _is_master_admin(ctx: AuthContext) -> bool:
-    return is_master_realm_super_admin(ctx)
+    return is_platform_realm_super_admin(ctx)
 
 
 def effective_authz_roles(ctx: AuthContext) -> set[str]:
@@ -522,7 +522,7 @@ def require_platform_super_admin():
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "platform_admin_required",
-                "message": "Platform super admin access requires a super_admin token from the admin realm.",
+                "message": "Platform super admin access requires a super_admin token from the platform realm.",
             },
         )
 

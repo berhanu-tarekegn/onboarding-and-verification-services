@@ -58,6 +58,7 @@ class TestPlatformSuperAdminTenantHeader(unittest.IsolatedAsyncioTestCase):
         os.environ["AUTH_AUDIENCE"] = ""
         os.environ["AUTH_ISSUERS"] = ""
         os.environ["KEYCLOAK_ADMIN_REALM"] = "master"
+        os.environ["KEYCLOAK_PLATFORM_REALM"] = "oaas-platform"
         os.environ["KEYCLOAK_TRUSTED_ISSUER_BASES"] = "https://keycloak.dev"
         os.environ["KEYCLOAK_JWKS_JSON"] = json.dumps(self.jwks)
 
@@ -104,8 +105,8 @@ class TestPlatformSuperAdminTenantHeader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()["detail"]["code"], "tenant_mismatch")
 
-    async def test_master_realm_super_admin_can_target_tenant_with_header(self) -> None:
-        token = self._token(issuer_realm="master", tenant_id="master", roles=["super_admin"])
+    async def test_platform_realm_super_admin_can_target_tenant_with_header(self) -> None:
+        token = self._token(issuer_realm="oaas-platform", tenant_id="oaas-platform", roles=["super_admin"])
         resp = await self.client.get(
             "/scoped",
             headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": "ovp"},
@@ -113,8 +114,8 @@ class TestPlatformSuperAdminTenantHeader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["tenant_id"], "ovp")
 
-    async def test_master_realm_super_admin_requires_x_tenant_header(self) -> None:
-        token = self._token(issuer_realm="master", tenant_id="master", roles=["super_admin"])
+    async def test_platform_realm_super_admin_requires_x_tenant_header(self) -> None:
+        token = self._token(issuer_realm="oaas-platform", tenant_id="oaas-platform", roles=["super_admin"])
         resp = await self.client.get(
             "/scoped",
             headers={"Authorization": f"Bearer {token}"},

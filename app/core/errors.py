@@ -159,10 +159,10 @@ def add_exception_handlers(app: FastAPI) -> None:
             debug_details = {"error": str(exc)[:2000]}
 
         # Friendly hint for the most common local/dev failure: schema drift.
-        # Example: column tenants.schema_name does not exist
+        # Example: column tenants.tenant_key does not exist
         text = str(exc)
         if "UndefinedColumnError" in text or "does not exist" in text:
-            if "schema_name" in text and ("tenants" in text or "public.tenants" in text):
+            if any(token in text for token in ("schema_name", "tenant_key")) and ("tenants" in text or "public.tenants" in text):
                 message = "Database schema is out of date. Run migrations (python -m alembic upgrade head)."
                 code = "database_schema_outdated"
 

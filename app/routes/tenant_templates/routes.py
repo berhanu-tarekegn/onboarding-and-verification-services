@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.auth import require_role
+from app.core.authz import require_platform_super_admin
 from app.core.dependencies import require_tenant_header
 from app.db.session import tenant_session_for_permissions
 from app.schemas.tenant_templates import (
@@ -199,7 +199,7 @@ async def approve_tenant_template_definition(
     template_id: UUID,
     version_id: UUID,
     data: TenantTemplateDefinitionReviewRequest,
-    _ctx=Depends(require_role("super_admin")),
+    _ctx=Depends(require_platform_super_admin()),
     session: AsyncSession = Depends(tenant_session_for_permissions("templates.read")),
 ):
     """Approve a pending tenant template definition as super_admin."""
@@ -216,7 +216,7 @@ async def request_changes_tenant_template_definition(
     template_id: UUID,
     version_id: UUID,
     data: TenantTemplateDefinitionReviewRequest,
-    _ctx=Depends(require_role("super_admin")),
+    _ctx=Depends(require_platform_super_admin()),
     session: AsyncSession = Depends(tenant_session_for_permissions("templates.read")),
 ):
     """Request changes on a pending tenant template definition as super_admin."""

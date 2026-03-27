@@ -6,6 +6,7 @@ Services are organized by domain:
 - tenant_templates: Tenant-specific templates (per-tenant schema)
 - submissions: Form submissions (per-tenant schema)
 - products: Tenant-owned onboarding products with KYC template linking (per-tenant schema)
+- verifications: Config-driven verification flows for submissions
 """
 
 from app.services import tenants
@@ -13,6 +14,7 @@ from app.services import baseline_templates
 from app.services import tenant_templates
 from app.services import submissions
 from app.services import products
+from app.services import verifications
 
 __all__ = [
     "tenants",
@@ -20,4 +22,5 @@ __all__ = [
     "tenant_templates",
     "submissions",
     "products",
+    "verifications",
 ]

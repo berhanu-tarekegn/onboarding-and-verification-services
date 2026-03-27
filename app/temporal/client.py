@@ -51,3 +51,10 @@ def get_temporal_client() -> Client:
             "Ensure connect() is called during application startup."
         )
     return _client
+
+
+async def get_or_connect_temporal_client() -> Client:
+    """Return the cached Temporal client, connecting lazily if needed."""
+    if _client is not None:
+        return _client
+    return await connect()

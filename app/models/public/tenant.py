@@ -1,7 +1,7 @@
 """Tenant registry model — lives in the ``public`` schema.
 
 The Tenant model stores metadata about each onboarded tenant.
-The tenant's ``schema_name`` is used directly as the PostgreSQL schema name
+The tenant's ``tenant_key`` is used directly as the PostgreSQL schema name
 for data isolation.
 """
 
@@ -19,10 +19,10 @@ class Tenant(PublicSchemaModel, table=True):
     Each tenant gets:
     - A unique UUID (used as X-Tenant-ID header value)
     - A human-readable name
-    - A schema_name that IS the PostgreSQL schema (no spaces, no special chars)
+    - A tenant_key that IS the PostgreSQL schema key (no spaces, no special chars)
     - An active flag for soft-delete functionality
 
-    The ``schema_name`` is used directly as the tenant's PostgreSQL schema name,
+    The ``tenant_key`` is used directly as the tenant's PostgreSQL schema name,
     enabling schema-based isolation of tenant data. It must be unique, lowercase,
     contain only letters/digits/underscores, and start with a letter.
     """
@@ -36,7 +36,7 @@ class Tenant(PublicSchemaModel, table=True):
         nullable=False,
     )
     name: str = Field(index=True, max_length=255)
-    schema_name: str = Field(
+    tenant_key: str = Field(
         unique=True,
         index=True,
         max_length=63,  # PostgreSQL identifier limit
@@ -46,7 +46,7 @@ class Tenant(PublicSchemaModel, table=True):
     is_active: bool = Field(default=True)
 
     # ── Keycloak provisioning metadata ───────────────────────────────
-    # Realm name is typically the same as schema_name (platform identifier).
+    # Realm name is typically the same as tenant_key (platform identifier).
     keycloak_realm: str | None = Field(
         default=None,
         unique=True,
@@ -66,3 +66,12 @@ class Tenant(PublicSchemaModel, table=True):
         max_length=2048,
         description="Keycloak OIDC client secret for this realm (if confidential).",
     )
+
+    @property
+    def schema_name(self) -> str:
+        """Compatibility alias during the tenant_key migration."""
+        return self.tenant_key
+
+    @schema_name.setter
+    def schema_name(self, value: str) -> None:
+        self.tenant_key = value

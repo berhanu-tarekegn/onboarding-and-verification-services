@@ -1,14 +1,15 @@
 """Tenant CRUD service — operates on the public schema.
 
-Manages tenant registration and their associated PostgreSQL schemas.
+Manages tenant registration and tenant initialization.
 Each tenant gets:
 - A record in public.tenants (registry)
 - A dedicated PostgreSQL schema for their isolated data
+- An optional Keycloak realm/client when tenant initialization is enabled
 
 The tenant UUID (id) is used as the X-Tenant-ID header value.
-The schema_name field directly names the PostgreSQL schema.
 """
 
+import json
 from uuid import UUID
 from typing import Optional
 
@@ -41,45 +42,33 @@ async def create_tenant(
     engine: AsyncEngine,
     database_url: str | None = None,
 ) -> Tenant:
-    """Create a new tenant and provision its PostgreSQL schema.
+    """Create a new tenant and initialize its tenant resources.
 
     1. Creates a tenant record in public.tenants
     2. Creates a dedicated PostgreSQL schema (e.g., tenant_acme_bank)
     3. Runs migrations to create tenant-specific tables in that schema
     """
-    tenant = Tenant.model_validate(data)
-    if tenant.keycloak_realm is None and get_settings().KEYCLOAK_PROVISIONING_ENABLED:
-        tenant.keycloak_realm = tenant.schema_name
+    tenant = Tenant(
+        name=data.name,
+        tenant_key=data.tenant_key,
+        keycloak_realm=data.tenant_key,
+    )
     session.add(tenant)
 
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
-        # Identify the actual conflict (schema_name vs keycloak_realm, etc.) so
-        # we don't mislead callers on generic integrity errors.
-        existing = await get_tenant_by_schema_name(data.schema_name, session)
+        existing = await get_tenant_by_key(data.tenant_key, session)
         if existing is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "code": "tenant_already_exists",
-                    "message": f"Tenant with schema_name '{data.schema_name}' already exists.",
+                    "message": f"Tenant with tenant_key '{data.tenant_key}' already exists.",
                     "details": {"tenant_id": str(existing.id)},
                 },
             )
-        if data.keycloak_realm:
-            result = await session.execute(select(Tenant).where(Tenant.keycloak_realm == data.keycloak_realm))
-            existing_realm = result.scalars().first()
-            if existing_realm is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "realm_already_linked",
-                        "message": f"Keycloak realm '{data.keycloak_realm}' is already linked to a tenant.",
-                        "details": {"tenant_id": str(existing_realm.id)},
-                    },
-                )
 
         details = None
         if get_settings().DEBUG:
@@ -97,7 +86,7 @@ async def create_tenant(
 
     try:
         await provision_tenant_schema(
-            tenant_schema_name=tenant.schema_name,
+            tenant_schema_name=tenant.tenant_key,
             engine=engine,
             database_url=database_url,
         )
@@ -105,7 +94,7 @@ async def create_tenant(
         # Avoid leaving partially created tenants around (confusing retries).
         # Best-effort cleanup: drop schema and delete tenant row.
         try:
-            await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+            await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -129,8 +118,8 @@ async def create_tenant(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
-                "code": "tenant_schema_provision_failed",
-                "message": "Tenant database schema provisioning failed.",
+                "code": "tenant_schema_initialization_failed",
+                "message": "Tenant database schema initialization failed.",
                 "details": details,
             },
         ) from exc
@@ -138,12 +127,12 @@ async def create_tenant(
     settings = get_settings()
     if settings.KEYCLOAK_PROVISIONING_ENABLED:
         try:
-            realm = tenant.keycloak_realm or tenant.schema_name
+            realm = tenant.keycloak_realm or tenant.tenant_key
             realm_created = await ensure_realm(realm)
             await ensure_roles(
                 realm,
                 roles=[
-                    "super_admin",
+                    "tenant_admin",
                     "schema_author",
                     "platform_admin",
                     "maker",
@@ -164,6 +153,7 @@ async def create_tenant(
             session.add(tenant)
             await session.commit()
             await session.refresh(tenant)
+            await _bootstrap_tenant_realm_users(realm)
         except Exception as exc:  # noqa: BLE001
             if settings.KEYCLOAK_PROVISIONING_REQUIRED:
                 # Best-effort: if we created the realm in this attempt, try to delete it
@@ -182,7 +172,7 @@ async def create_tenant(
                 except Exception:  # noqa: BLE001
                     await session.rollback()
                 try:
-                    await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+                    await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
                 except Exception:  # noqa: BLE001
                     pass
                 try:
@@ -196,16 +186,20 @@ async def create_tenant(
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
-                        "code": "keycloak_provision_failed",
-                        "message": "Keycloak provisioning failed.",
+                        "code": "keycloak_initialization_failed",
+                        "message": "Keycloak tenant initialization failed.",
                         "details": details,
                     },
                 ) from exc
             # Best-effort: keep tenant + DB schema, but without Keycloak linkage.
-            # Caller can retry provisioning separately.
+            # Caller can retry tenant initialization separately.
             import logging
 
-            logging.getLogger(__name__).warning("Keycloak provisioning failed for tenant %s: %s", tenant.schema_name, exc)
+            logging.getLogger(__name__).warning(
+                "Keycloak tenant initialization failed for tenant %s: %s",
+                tenant.tenant_key,
+                exc,
+            )
 
     return tenant
 
@@ -234,12 +228,17 @@ async def get_tenant(tenant_id: UUID, session: AsyncSession) -> Tenant:
     return tenant
 
 
-async def get_tenant_by_schema_name(schema_name: str, session: AsyncSession) -> Optional[Tenant]:
-    """Return a tenant by schema_name or None if not found."""
+async def get_tenant_by_key(tenant_key: str, session: AsyncSession) -> Optional[Tenant]:
+    """Return a tenant by tenant key or Keycloak realm."""
     result = await session.execute(
-        select(Tenant).where(Tenant.schema_name == schema_name)
+        select(Tenant).where((Tenant.tenant_key == tenant_key) | (Tenant.keycloak_realm == tenant_key))
     )
     return result.scalars().first()
+
+
+async def get_tenant_by_schema_name(schema_name: str, session: AsyncSession) -> Optional[Tenant]:
+    """Backward-compatible wrapper around the canonical tenant key lookup."""
+    return await get_tenant_by_key(schema_name, session)
 
 
 async def update_tenant(
@@ -249,7 +248,7 @@ async def update_tenant(
 ) -> Tenant:
     """Partially update a tenant.
 
-    Note: schema_name cannot be changed after creation — it would require
+    Note: tenant_key cannot be changed after creation — it would require
     renaming the PostgreSQL schema and all its objects.
     """
     tenant = await get_tenant(tenant_id, session)
@@ -284,7 +283,7 @@ async def delete_tenant(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Engine required for hard delete.",
             )
-        await drop_tenant_schema(tenant.schema_name, engine, cascade=True)
+        await drop_tenant_schema(tenant.tenant_key, engine, cascade=True)
         await session.delete(tenant)
         await session.commit()
         return tenant
@@ -298,12 +297,91 @@ async def delete_tenant(
 
 
 _ALLOWED_REALM_ROLES: set[str] = {
-    "super_admin",
+    "tenant_admin",
     "schema_author",
     "platform_admin",
     "maker",
     "checker",
 }
+
+
+def _render_bootstrap_template(value: str, *, realm: str) -> str:
+    return value.replace("{realm}", realm)
+
+
+def _load_bootstrap_users(realm: str) -> list[dict[str, object]]:
+    settings = get_settings()
+    raw = (settings.KEYCLOAK_BOOTSTRAP_USERS_JSON or "").strip()
+    password = (settings.KEYCLOAK_BOOTSTRAP_PASSWORD or "").strip()
+    if not raw or not password:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("KEYCLOAK_BOOTSTRAP_USERS_JSON is not valid JSON") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("KEYCLOAK_BOOTSTRAP_USERS_JSON must be a JSON array")
+
+    rendered: list[dict[str, object]] = []
+    email_domain = (settings.KEYCLOAK_BOOTSTRAP_EMAIL_DOMAIN or "example.com").strip() or "example.com"
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Bootstrap user at index {index} must be an object")
+        username_raw = item.get("username")
+        if not isinstance(username_raw, str) or not username_raw.strip():
+            raise RuntimeError(f"Bootstrap user at index {index} is missing username")
+        username = _render_bootstrap_template(username_raw.strip(), realm=realm)
+        role_items = item.get("roles")
+        if not isinstance(role_items, list) or not role_items:
+            raise RuntimeError(f"Bootstrap user '{username}' must define at least one role")
+        roles = [
+            _render_bootstrap_template(role.strip(), realm=realm)
+            for role in role_items
+            if isinstance(role, str) and role.strip()
+        ]
+        invalid = sorted({role for role in roles if role not in _ALLOWED_REALM_ROLES})
+        if invalid:
+            raise RuntimeError(
+                f"Bootstrap user '{username}' includes unsupported roles: {', '.join(invalid)}"
+            )
+        email = item.get("email")
+        if isinstance(email, str) and email.strip():
+            email_value = _render_bootstrap_template(email.strip(), realm=realm)
+        else:
+            email_value = f"{username}@{email_domain}"
+        first_name = item.get("first_name")
+        last_name = item.get("last_name")
+        rendered.append(
+            {
+                "username": username,
+                "roles": roles,
+                "email": email_value,
+                "first_name": _render_bootstrap_template(first_name.strip(), realm=realm)
+                if isinstance(first_name, str) and first_name.strip()
+                else None,
+                "last_name": _render_bootstrap_template(last_name.strip(), realm=realm)
+                if isinstance(last_name, str) and last_name.strip()
+                else None,
+            }
+        )
+    return rendered
+
+
+async def _bootstrap_tenant_realm_users(realm: str) -> None:
+    settings = get_settings()
+    password = (settings.KEYCLOAK_BOOTSTRAP_PASSWORD or "").strip()
+    if not password:
+        return
+    for user in _load_bootstrap_users(realm):
+        user_id = await ensure_user(
+            realm,
+            username=str(user["username"]),
+            email=str(user["email"]) if user.get("email") else None,
+            first_name=str(user["first_name"]) if user.get("first_name") else None,
+            last_name=str(user["last_name"]) if user.get("last_name") else None,
+        )
+        await set_user_password(realm, user_id=user_id, password=password, temporary=False)
+        await assign_realm_roles(realm, user_id=user_id, roles=list(user["roles"]))
 
 
 async def create_tenant_user(
@@ -320,11 +398,11 @@ async def create_tenant_user(
     if not settings.KEYCLOAK_PROVISIONING_ENABLED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "keycloak_disabled", "message": "Keycloak provisioning is disabled."},
+            detail={"code": "keycloak_disabled", "message": "Keycloak tenant initialization is disabled."},
         )
 
     tenant = await get_tenant(tenant_id, session)
-    realm = (tenant.keycloak_realm or tenant.schema_name or "").strip()
+    realm = (tenant.keycloak_realm or tenant.tenant_key or "").strip()
     if not realm:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -430,7 +508,7 @@ async def create_tenant_user(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
                     "code": "keycloak_forbidden",
-                    "message": "Keycloak provisioning account is missing permissions (grant manage-users/view-users in master realm).",
+                    "message": "Keycloak tenant initialization account is missing permissions (grant manage-users/view-users in master realm).",
                     "details": details,
                 },
             ) from exc

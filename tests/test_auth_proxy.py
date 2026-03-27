@@ -93,3 +93,51 @@ class TestAuthProxy(unittest.IsolatedAsyncioTestCase):
                 content=json.dumps({"username": "u", "password": "p"}),
             )
             self.assertEqual(resp.status_code, 404)
+
+    async def test_service_token_proxies_client_credentials_to_keycloak(self) -> None:
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"access_token": "svc", "expires_in": 300}
+
+        with patch(
+            "app.routes.auth.routes._discover_realm_exists_with_attempts",
+            new=AsyncMock(return_value=(True, [])),
+        ), patch(
+            "app.routes.auth.routes._post_to_keycloak_realm_with_fallback",
+            new=AsyncMock(return_value=_Resp()),
+        ) as mocked:
+            resp = await self.client.post(
+                "/api/auth/service-token/kifiya",
+                headers={"Content-Type": "application/json"},
+                content=json.dumps({"scope": "submissions.read"}),
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["access_token"], "svc")
+            _, kwargs = mocked.await_args
+            self.assertEqual(kwargs["data"]["grant_type"], "client_credentials")
+            self.assertEqual(kwargs["data"]["client_id"], "test-client")
+            self.assertEqual(kwargs["data"]["scope"], "submissions.read")
+
+    async def test_service_token_invalid_client_returns_401(self) -> None:
+        class _Resp:
+            status_code = 401
+
+            def json(self):
+                return {"error": "invalid_client"}
+
+        with patch(
+            "app.routes.auth.routes._discover_realm_exists_with_attempts",
+            new=AsyncMock(return_value=(True, [])),
+        ), patch(
+            "app.routes.auth.routes._post_to_keycloak_realm_with_fallback",
+            new=AsyncMock(return_value=_Resp()),
+        ):
+            resp = await self.client.post(
+                "/api/auth/service-token/kifiya",
+                headers={"Content-Type": "application/json"},
+                content=json.dumps({}),
+            )
+            self.assertEqual(resp.status_code, 401)
+            self.assertEqual(resp.json()["error"]["code"], "invalid_client_credentials")

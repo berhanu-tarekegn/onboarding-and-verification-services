@@ -23,6 +23,9 @@ from app.db.session import tenant_session_for_permissions, tenant_session_for_an
 from app.schemas.submissions import (
     SubmissionStatus,
     SubmissionCreate,
+    SubmissionSearchConfigRead,
+    SubmissionSearchRequest,
+    SubmissionSearchResultRead,
     SubmissionUpdate,
     SubmissionRead,
     SubmissionReadWithHistory,
@@ -31,8 +34,12 @@ from app.schemas.submissions import (
     SubmissionCommentCreate,
     SubmissionCommentRead,
     SubmissionListFilters,
+    VerificationStartRequest,
+    VerificationActionRequest,
+    VerificationRunRead,
 )
 from app.services import submissions as submission_svc
+from app.services.verifications import service as verification_svc
 from app.core.authz import enforce_write_columns
 
 router = APIRouter(
@@ -108,6 +115,43 @@ async def list_submissions(
         deny = set((columns.get(perm_key, {}) or {}).get("deny", set()) or set())
     for s in items:
         _mask_fields(s, deny=deny)
+    return items
+
+
+@router.get(
+    "/search-config",
+    response_model=SubmissionSearchConfigRead,
+)
+async def get_submission_search_config(
+    session: AsyncSession = Depends(
+        tenant_session_for_any_permissions("submissions.read", "submissions.read_all")
+    ),
+):
+    """Return tenant-discovered submission search filters from active template config."""
+    return await submission_svc.get_submission_search_config(session)
+
+
+@router.post(
+    "/search",
+    response_model=list[SubmissionSearchResultRead],
+)
+async def search_submissions(
+    body: SubmissionSearchRequest,
+    request: Request,
+    session: AsyncSession = Depends(
+        tenant_session_for_any_permissions("submissions.read", "submissions.read_all")
+    ),
+):
+    """Search submissions using native, verification, and tenant-configured filters."""
+    items = await submission_svc.search_submissions(session, body)
+    columns = getattr(request.state, "authz_columns", {})
+    perms = getattr(request.state, "authz_perms", set())
+    perm_key = "submissions.read_all" if "submissions.read_all" in perms else "submissions.read"
+    deny = set()
+    if isinstance(columns, dict):
+        deny = set((columns.get(perm_key, {}) or {}).get("deny", set()) or set())
+    for item in items:
+        _mask_fields(item, deny=deny)
     return items
 
 
@@ -191,7 +235,49 @@ async def get_submission_full(
         ungrouped_questions=result["ungrouped_questions"],
         status_history=result["status_history"],
         comments=result["comments"],
+        verification=result.get("verification"),
     )
+
+
+@router.get(
+    "/{submission_id}/verification",
+    response_model=VerificationRunRead | None,
+)
+async def get_submission_verification(
+    submission_id: UUID,
+    session: AsyncSession = Depends(
+        tenant_session_for_any_permissions("submissions.read", "submissions.read_all")
+    ),
+):
+    """Get the latest verification flow state for a submission."""
+    return await verification_svc.get_latest_verification_run(submission_id, session)
+
+
+@router.post(
+    "/{submission_id}/verification/start",
+    response_model=VerificationRunRead,
+)
+async def start_submission_verification(
+    submission_id: UUID,
+    body: VerificationStartRequest,
+    session: AsyncSession = Depends(tenant_session_for_permissions("submissions.submit")),
+):
+    """Create, defer, start, or resume a configurable verification flow."""
+    return await verification_svc.start_verification(submission_id, body, session)
+
+
+@router.post(
+    "/{submission_id}/verification/steps/{step_key}/actions",
+    response_model=VerificationRunRead,
+)
+async def submit_submission_verification_action(
+    submission_id: UUID,
+    step_key: str,
+    body: VerificationActionRequest,
+    session: AsyncSession = Depends(tenant_session_for_permissions("submissions.submit")),
+):
+    """Submit a user or agent action, such as an OTP code, for a waiting verification step."""
+    return await verification_svc.submit_step_action(submission_id, step_key, body, session)
 
 
 @router.patch(

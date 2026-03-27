@@ -1,7 +1,7 @@
 """Async database engine, session dependencies, and schema-based tenant isolation.
 
 This app uses **schema-based** multi-tenancy:
-- Each tenant has its own PostgreSQL schema (``tenant_<schema_name>``).
+- Each tenant has its own PostgreSQL schema (``tenant_<tenant_key>``).
 - For tenant-scoped requests, we switch ``search_path`` per DB session to:
   1) the tenant schema, then 2) ``public``.
 
@@ -81,9 +81,9 @@ async def dispose_engines() -> None:
         await engine.dispose()
 
 
-def _sanitize_schema_name(schema_name: str) -> str:
-    """Return a safe PostgreSQL schema identifier for a tenant schema_name."""
-    base = (schema_name or "").strip().lower()
+def _sanitize_schema_name(tenant_key: str) -> str:
+    """Return a safe PostgreSQL schema identifier for a tenant key."""
+    base = (tenant_key or "").strip().lower()
     sanitized = "".join(c if c.isalnum() else "_" for c in base)
     if not sanitized:
         sanitized = "tenant"
@@ -106,7 +106,7 @@ def _tenant_clause(tenant_identifier: str) -> Any:
         return Tenant.id == tenant_uuid
     except Exception:
         ident = (tenant_identifier or "").strip()
-        return (Tenant.schema_name == ident) | (Tenant.keycloak_realm == ident)
+        return (Tenant.tenant_key == ident) | (Tenant.keycloak_realm == ident)
 
 
 async def _validate_tenant(session: AsyncSession, tenant_identifier: str) -> Tenant:
@@ -141,7 +141,7 @@ async def get_tenant_session() -> AsyncGenerator[AsyncSession, None]:
     async with get_async_session_factory()() as session:
         tenant = await _validate_tenant(session, tenant_identifier)
         token = tenant_id_context.set(tenant.id)
-        pg_schema = _sanitize_schema_name(tenant.schema_name)
+        pg_schema = _sanitize_schema_name(tenant.tenant_key)
         await _set_search_path(session, pg_schema)
 
         try:
@@ -243,6 +243,6 @@ async def get_tenant_readonly_session() -> AsyncGenerator[AsyncSession, None]:
 get_db_session = get_tenant_session
 
 
-async def get_schema_name_for_tenant(tenant_schema_name: str) -> str:
+async def get_schema_name_for_tenant(tenant_key: str) -> str:
     """Return the full PostgreSQL schema identifier for a tenant."""
-    return _sanitize_schema_name(tenant_schema_name)
+    return _sanitize_schema_name(tenant_key)

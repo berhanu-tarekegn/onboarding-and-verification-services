@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -99,31 +99,37 @@ class Settings(BaseSettings):
     # Results are cached for this many seconds.
     KEYCLOAK_REALM_DISCOVERY_TTL_SECONDS: int = 60 * 60
 
-    # ── Keycloak provisioning (US-201) ──────────
+    # ── Keycloak tenant initialization (US-201) ──────────
     # Optional dedicated base URL for Keycloak Admin API calls. This is useful
     # when user-facing traffic goes through Kong (e.g. /keycloak) but the Admin
     # API is only reachable via a different internal URL.
     KEYCLOAK_ADMIN_BASE_URL: str = ""
-    KEYCLOAK_PROVISIONING_ENABLED: bool = False
-    KEYCLOAK_PROVISIONING_REQUIRED: bool = False
+    KEYCLOAK_PROVISIONING_ENABLED: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KEYCLOAK_TENANT_INITIALIZATION_ENABLED", "KEYCLOAK_PROVISIONING_ENABLED"),
+    )
+    KEYCLOAK_PROVISIONING_REQUIRED: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KEYCLOAK_TENANT_INITIALIZATION_REQUIRED", "KEYCLOAK_PROVISIONING_REQUIRED"),
+    )
     KEYCLOAK_ADMIN_REALM: str = "master"
     KEYCLOAK_ADMIN_CLIENT_ID: str = "admin-cli"
     # Optional: prefer client_credentials (service account) over admin user/pass.
-    # If set, provisioning will authenticate with grant_type=client_credentials.
+    # If set, tenant initialization will authenticate with grant_type=client_credentials.
     KEYCLOAK_ADMIN_CLIENT_SECRET: str = ""
     KEYCLOAK_ADMIN_USERNAME: str = ""
     KEYCLOAK_ADMIN_PASSWORD: str = ""
-    # Client ID to create inside each realm when provisioning.
+    # Client ID to create inside each realm during tenant initialization.
     KEYCLOAK_TENANT_CLIENT_ID: str = "oaas-client"
     KEYCLOAK_TENANT_CLIENT_CONFIDENTIAL: bool = True
 
-    # Optional: bootstrap users created in each newly-provisioned realm.
+    # Optional: bootstrap users created in each initialized tenant realm.
     # Provide a JSON list like:
-    # [{"username":"{realm}_super_admin","roles":["super_admin"]},
+    # [{"username":"{realm}_tenant_admin","roles":["tenant_admin"]},
     #  {"username":"{realm}_platform_admin","roles":["platform_admin"]},
     #  {"username":"{realm}_maker","roles":["maker"]},
     #  {"username":"{realm}_checker","roles":["checker"]}]
-    # `{realm}` is replaced with the tenant schema_name / realm name.
+    # `{realm}` is replaced with the tenant_key / realm name.
     KEYCLOAK_BOOTSTRAP_USERS_JSON: str = ""
     # Password to set for all bootstrap users (dev only). If empty, no users are created.
     KEYCLOAK_BOOTSTRAP_PASSWORD: str = ""
@@ -134,11 +140,14 @@ class Settings(BaseSettings):
     # ── AuthZ policy cache ─────────────────────────────────────────
     AUTHZ_CACHE_TTL_SECONDS: int = 30
 
-    # ── Internal provisioning guard ─────────────
-    # Optional shared secret to protect "platform provisioning" endpoints
+    # ── Internal tenant initialization guard ─────────────
+    # Optional shared secret to protect "platform tenant initialization" endpoints
     # (e.g. POST /api/v1/tenants) in addition to JWT role checks.
     # If empty, no extra guard is applied.
-    PLATFORM_PROVISIONING_API_KEY: str = ""
+    PLATFORM_PROVISIONING_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("PLATFORM_INITIALIZATION_API_KEY", "PLATFORM_PROVISIONING_API_KEY"),
+    )
 
     # ── User management integration ──────────────────
     USER_MANAGEMENT_SERVICE_ENABLED: bool = False

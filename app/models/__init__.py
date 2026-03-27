@@ -16,7 +16,12 @@ from app.models import tenant  # noqa: F401
 
 # Re-export commonly used models for convenience
 from app.models.public import Tenant, BaselineTemplate, BaselineTemplateDefinition
-from app.models.tenant import TenantTemplate, TenantTemplateDefinition
+from app.models.tenant import (
+    TenantTemplate,
+    TenantTemplateDefinition,
+    VerificationRun,
+    VerificationStepRun,
+)
 
 __all__ = [
     "public",
@@ -26,4 +31,6 @@ __all__ = [
     "BaselineTemplateDefinition",
     "TenantTemplate",
     "TenantTemplateDefinition",
+    "VerificationRun",
+    "VerificationStepRun",
 ]

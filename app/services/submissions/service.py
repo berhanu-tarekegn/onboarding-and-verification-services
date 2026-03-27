@@ -8,16 +8,18 @@ The service handles:
 - Comments for collaboration
 """
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import asc, desc
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.context import get_current_user, jwt_roles_context
+from app.core.context import get_current_user, jwt_platform_super_admin_context, jwt_roles_context
 from app.models.tenant.submission import (
     Submission,
     SubmissionStatus,
@@ -26,8 +28,14 @@ from app.models.tenant.submission import (
 )
 from app.models.tenant.template import TenantTemplate, TenantTemplateDefinition
 from app.models.tenant.product import Product
+from app.models.tenant.verification import VerificationRun, VerificationStepRun
 from app.schemas.submissions import (
     SubmissionCreate,
+    SubmissionSearchConfigRead,
+    SubmissionSearchCriterion,
+    SubmissionSearchFilterRead,
+    SubmissionSearchRequest,
+    SubmissionSearchResultRead,
     SubmissionUpdate,
     SubmissionStatusTransition,
     SubmissionCommentCreate,
@@ -35,6 +43,7 @@ from app.schemas.submissions import (
 )
 from app.services.submissions.answer_validator import validate_form_data
 from app.services import tenant_templates as tenant_template_svc
+from app.services.verifications import service as verification_svc
 
 
 # Valid status transitions
@@ -69,7 +78,33 @@ VALID_TRANSITIONS: Dict[SubmissionStatus, List[SubmissionStatus]] = {
     SubmissionStatus.CANCELLED: [],  # Terminal state
 }
 
-_ELEVATED_ROLES = frozenset({"checker", "platform_admin", "super_admin"})
+_ELEVATED_ROLES = frozenset({"checker", "platform_admin", "tenant_admin"})
+_NATIVE_SEARCH_FILTERS = [
+    "status",
+    "template_id",
+    "product_id",
+    "submitter_id",
+    "external_ref",
+    "created_after",
+    "created_before",
+]
+_VERIFICATION_SEARCH_FILTERS = [
+    "verification_status",
+    "verification_decision",
+    "verification_kyc_level",
+    "verification_current_step_key",
+]
+_ALLOWED_CONFIGURED_FILTER_SOURCES = frozenset(
+    {"form_data", "computed_data", "validation_results", "submission", "verification"}
+)
+_ALLOWED_CONFIGURED_FILTER_OPERATORS = frozenset({"eq", "ne", "in", "contains", "gte", "lte", "exists"})
+_ALLOWED_SEARCH_SORTS = {
+    "created_at": Submission.created_at,
+    "updated_at": Submission.updated_at,
+    "submitted_at": Submission.submitted_at,
+    "reviewed_at": Submission.reviewed_at,
+    "completed_at": Submission.completed_at,
+}
 
 
 def _current_roles() -> frozenset[str]:
@@ -77,7 +112,7 @@ def _current_roles() -> frozenset[str]:
 
 
 def _is_super_admin() -> bool:
-    return "super_admin" in _current_roles()
+    return bool(jwt_platform_super_admin_context.get())
 
 
 def _is_maker_only() -> bool:
@@ -90,6 +125,336 @@ def _forbidden(message: str, *, code: str = "forbidden") -> HTTPException:
         status_code=status.HTTP_403_FORBIDDEN,
         detail={"code": code, "message": message},
     )
+
+
+def _lookup_mapping(mapping: Any, path: str) -> Any:
+    if not path:
+        return mapping
+    current = mapping
+    for part in path.split("."):
+        if not part:
+            continue
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+        if current is None:
+            return None
+    return current
+
+
+def _lookup_submission_field(submission: Submission, path: str) -> Any:
+    current: Any = submission
+    for part in path.split("."):
+        if not part:
+            continue
+        current = getattr(current, part, None)
+        if current is None:
+            return None
+        if hasattr(current, "value"):
+            current = current.value
+    return current
+
+
+def _build_submission_query(
+    filters: Optional[SubmissionListFilters] = None,
+):
+    query = select(Submission)
+
+    if _is_maker_only():
+        query = query.where(Submission.created_by == get_current_user())
+
+    if filters:
+        if filters.status:
+            query = query.where(Submission.status == filters.status)
+        if filters.template_id:
+            query = query.where(Submission.template_id == filters.template_id)
+        if filters.product_id:
+            query = query.where(Submission.product_id == filters.product_id)
+        if filters.submitter_id:
+            query = query.where(Submission.submitter_id == filters.submitter_id)
+        if filters.external_ref:
+            query = query.where(Submission.external_ref == filters.external_ref)
+        if filters.created_after:
+            query = query.where(Submission.created_at >= filters.created_after)
+        if filters.created_before:
+            query = query.where(Submission.created_at <= filters.created_before)
+
+    return query
+
+
+def _serialize_submission_row(
+    submission: Submission,
+    *,
+    verification: Any | None = None,
+) -> SubmissionSearchResultRead:
+    return SubmissionSearchResultRead(
+        id=submission.id,
+        template_id=submission.template_id,
+        template_version_id=submission.template_version_id,
+        baseline_version_id=submission.baseline_version_id,
+        product_id=submission.product_id,
+        form_data=deepcopy(submission.form_data or {}),
+        computed_data=deepcopy(submission.computed_data or {}),
+        validation_results=deepcopy(submission.validation_results or {}),
+        attachments=deepcopy(submission.attachments or {}),
+        status=submission.status,
+        submitter_id=submission.submitter_id,
+        external_ref=submission.external_ref,
+        submitted_at=submission.submitted_at,
+        reviewed_at=submission.reviewed_at,
+        completed_at=submission.completed_at,
+        reviewed_by=submission.reviewed_by,
+        review_notes=submission.review_notes,
+        maker_id=submission.created_by,
+        created_at=submission.created_at,
+        updated_at=submission.updated_at,
+        created_by=submission.created_by,
+        updated_by=submission.updated_by,
+        verification=verification,
+    )
+
+
+def _normalize_configured_filter(
+    raw: dict[str, Any],
+    *,
+    template_id: UUID,
+    template_version_id: UUID,
+) -> SubmissionSearchFilterRead:
+    key = str(raw.get("key") or "").strip()
+    if not key:
+        raise ValueError("Configured search filters require a non-empty key.")
+    source = str(raw.get("source") or "form_data").strip()
+    if source not in _ALLOWED_CONFIGURED_FILTER_SOURCES:
+        raise ValueError(f"Configured search filter '{key}' has unsupported source '{source}'.")
+    path = str(raw.get("path") or key).strip()
+    if not path:
+        raise ValueError(f"Configured search filter '{key}' requires a non-empty path.")
+    operators_raw = raw.get("operators")
+    if not isinstance(operators_raw, list) or not operators_raw:
+        operators = ["eq"]
+    else:
+        operators = [str(op).strip() for op in operators_raw if isinstance(op, str) and str(op).strip()]
+    invalid = sorted({op for op in operators if op not in _ALLOWED_CONFIGURED_FILTER_OPERATORS})
+    if invalid:
+        raise ValueError(f"Configured search filter '{key}' has unsupported operators: {', '.join(invalid)}")
+    return SubmissionSearchFilterRead(
+        key=key,
+        label=str(raw.get("label") or key),
+        source=source,
+        path=path,
+        operators=sorted(set(operators)),
+        value_type=str(raw.get("value_type")) if raw.get("value_type") is not None else None,
+        description=str(raw.get("description")) if raw.get("description") is not None else None,
+        template_ids=[template_id],
+        template_version_ids=[template_version_id],
+        ambiguous=False,
+    )
+
+
+def _configured_filter_signature(item: SubmissionSearchFilterRead) -> tuple[Any, ...]:
+    return (
+        item.source,
+        item.path,
+        item.value_type,
+        item.description,
+    )
+
+
+def _merge_configured_filters(
+    existing: SubmissionSearchFilterRead,
+    incoming: SubmissionSearchFilterRead,
+) -> SubmissionSearchFilterRead:
+    if _configured_filter_signature(existing) != _configured_filter_signature(incoming):
+        existing.ambiguous = True
+        return existing
+    existing.operators = sorted(set(existing.operators) | set(incoming.operators))
+    existing.template_ids = sorted(set(existing.template_ids) | set(incoming.template_ids), key=str)
+    existing.template_version_ids = sorted(
+        set(existing.template_version_ids) | set(incoming.template_version_ids),
+        key=str,
+    )
+    return existing
+
+
+async def get_submission_search_config(
+    session: AsyncSession,
+) -> SubmissionSearchConfigRead:
+    rows = await session.exec(
+        select(TenantTemplate.id, TenantTemplate.active_version_id).where(
+            TenantTemplate.is_active == True,
+            TenantTemplate.active_version_id != None,  # noqa: E711
+        )
+    )
+    catalog: dict[str, SubmissionSearchFilterRead] = {}
+    warnings: list[dict[str, Any]] = []
+
+    for template_id, version_id in rows.all():
+        if version_id is None:
+            continue
+        merged = await tenant_template_svc.get_tenant_template_definition_with_config(version_id, session)
+        rules_config = merged.get("rules_config", {}) if isinstance(merged, dict) else {}
+        search_cfg = (rules_config or {}).get("submission_search")
+        filters = search_cfg.get("filters") if isinstance(search_cfg, dict) else None
+        if not isinstance(filters, list):
+            continue
+
+        for raw in filters:
+            if not isinstance(raw, dict):
+                warnings.append(
+                    {
+                        "code": "submission_search_filter_invalid",
+                        "message": f"Template {template_id} contains a non-object submission search filter entry.",
+                    }
+                )
+                continue
+            try:
+                normalized = _normalize_configured_filter(
+                    raw,
+                    template_id=template_id,
+                    template_version_id=version_id,
+                )
+            except ValueError as exc:
+                warnings.append(
+                    {
+                        "code": "submission_search_filter_invalid",
+                        "message": str(exc),
+                        "details": {"template_id": str(template_id), "template_version_id": str(version_id)},
+                    }
+                )
+                continue
+
+            existing = catalog.get(normalized.key)
+            if existing is None:
+                catalog[normalized.key] = normalized
+                continue
+            catalog[normalized.key] = _merge_configured_filters(existing, normalized)
+            if catalog[normalized.key].ambiguous:
+                warnings.append(
+                    {
+                        "code": "submission_search_filter_ambiguous",
+                        "message": f"Configured search filter '{normalized.key}' is defined differently across templates and cannot be used without harmonizing the config.",
+                        "details": {"key": normalized.key},
+                    }
+                )
+
+    configured_filters = sorted(catalog.values(), key=lambda item: item.key)
+    return SubmissionSearchConfigRead(
+        native_filters=list(_NATIVE_SEARCH_FILTERS),
+        verification_filters=list(_VERIFICATION_SEARCH_FILTERS),
+        configured_filters=configured_filters,
+        warnings=warnings,
+    )
+
+
+async def _load_latest_verification_data(
+    submission_ids: list[UUID],
+    session: AsyncSession,
+) -> dict[UUID, dict[str, Any]]:
+    if not submission_ids:
+        return {}
+
+    run_rows = await session.exec(
+        select(VerificationRun)
+        .where(VerificationRun.submission_id.in_(submission_ids))
+        .order_by(VerificationRun.submission_id, VerificationRun.created_at.desc())
+    )
+    latest_by_submission: dict[UUID, VerificationRun] = {}
+    for run in run_rows.all():
+        latest_by_submission.setdefault(run.submission_id, run)
+
+    if not latest_by_submission:
+        return {}
+
+    run_ids = [run.id for run in latest_by_submission.values()]
+    step_rows = await session.exec(
+        select(VerificationStepRun)
+        .where(VerificationStepRun.run_id.in_(run_ids))
+        .order_by(VerificationStepRun.run_id, VerificationStepRun.created_at, VerificationStepRun.step_key)
+    )
+    steps_by_run: dict[UUID, list[VerificationStepRun]] = {}
+    for step in step_rows.all():
+        steps_by_run.setdefault(step.run_id, []).append(step)
+
+    out: dict[UUID, dict[str, Any]] = {}
+    for submission_id, run in latest_by_submission.items():
+        steps = steps_by_run.get(run.id, [])
+        summary = verification_svc.build_verification_summary(run, steps)
+        filter_doc = {
+            "id": str(run.id),
+            "flow_key": run.flow_key,
+            "journey": run.journey,
+            "status": run.status,
+            "decision": run.decision,
+            "kyc_level": run.kyc_level,
+            "current_step_key": run.current_step_key,
+            "result": deepcopy(run.result_snapshot or {}),
+            "facts": deepcopy(run.facts_snapshot or {}),
+            "steps": {
+                step.step_key: {
+                    "status": step.status,
+                    "outcome": step.outcome,
+                    "result": deepcopy(step.result_snapshot or {}),
+                    "output": deepcopy(step.output_snapshot or {}),
+                    "input": deepcopy(step.input_snapshot or {}),
+                }
+                for step in steps
+            },
+        }
+        out[submission_id] = {"summary": summary, "filter_doc": filter_doc}
+    return out
+
+
+def _resolve_search_value(
+    submission: Submission,
+    *,
+    source: str,
+    path: str,
+    verification_doc: dict[str, Any] | None,
+) -> Any:
+    if source == "form_data":
+        return _lookup_mapping(submission.form_data or {}, path)
+    if source == "computed_data":
+        return _lookup_mapping(submission.computed_data or {}, path)
+    if source == "validation_results":
+        return _lookup_mapping(submission.validation_results or {}, path)
+    if source == "submission":
+        return _lookup_submission_field(submission, path)
+    if source == "verification":
+        return _lookup_mapping(verification_doc or {}, path)
+    return None
+
+
+def _matches_search_operator(actual: Any, op: str, expected: Any) -> bool:
+    if op == "eq":
+        return actual == expected
+    if op == "ne":
+        return actual != expected
+    if op == "in":
+        if not isinstance(expected, list):
+            return False
+        return actual in expected
+    if op == "contains":
+        if actual is None:
+            return False
+        if isinstance(actual, list):
+            return expected in actual
+        return str(expected).lower() in str(actual).lower()
+    if op == "gte":
+        try:
+            return float(actual) >= float(expected)
+        except Exception:
+            return False
+    if op == "lte":
+        try:
+            return float(actual) <= float(expected)
+        except Exception:
+            return False
+    if op == "exists":
+        exists = actual is not None and actual != ""
+        if expected is None:
+            return exists
+        return exists if bool(expected) else not exists
+    return False
 
 
 def _enforce_maker_ownership(submission: Submission) -> None:
@@ -223,33 +588,119 @@ async def list_submissions(
     limit: int = 100,
 ) -> List[Submission]:
     """List submissions with optional filtering."""
-    query = select(Submission)
-
-
-    # Maker should only see their own submissions. Elevated roles can see all.
-    if _is_maker_only():
-        query = query.where(Submission.created_by == get_current_user())
-
-    if filters:
-        if filters.status:
-            query = query.where(Submission.status == filters.status)
-        if filters.template_id:
-            query = query.where(Submission.template_id == filters.template_id)
-        if filters.product_id:
-            query = query.where(Submission.product_id == filters.product_id)
-        if filters.submitter_id:
-            query = query.where(Submission.submitter_id == filters.submitter_id)
-        if filters.external_ref:
-            query = query.where(Submission.external_ref == filters.external_ref)
-        if filters.created_after:
-            query = query.where(Submission.created_at >= filters.created_after)
-        if filters.created_before:
-            query = query.where(Submission.created_at <= filters.created_before)
-    
+    query = _build_submission_query(filters)
     query = query.order_by(Submission.created_at.desc()).offset(skip).limit(limit)
-    
+
     result = await session.exec(query)
     return list(result.all())
+
+
+async def search_submissions(
+    session: AsyncSession,
+    request: SubmissionSearchRequest,
+) -> List[SubmissionSearchResultRead]:
+    """Search submissions using native, verification, and tenant-configured filters."""
+    config = await get_submission_search_config(session)
+    configured = {item.key: item for item in config.configured_filters}
+
+    for criterion in request.criteria:
+        definition = configured.get(criterion.key)
+        if definition is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "submission_search_filter_unknown",
+                    "message": f"Unknown configured submission filter '{criterion.key}'.",
+                },
+            )
+        if definition.ambiguous:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "submission_search_filter_ambiguous",
+                    "message": f"Configured submission filter '{criterion.key}' is ambiguous across templates.",
+                },
+            )
+        if criterion.op not in set(definition.operators):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "submission_search_operator_invalid",
+                    "message": f"Operator '{criterion.op}' is not allowed for configured filter '{criterion.key}'.",
+                    "details": {"allowed_operators": definition.operators},
+                },
+            )
+
+    filters = SubmissionListFilters(
+        status=request.status,
+        template_id=request.template_id,
+        product_id=request.product_id,
+        submitter_id=request.submitter_id,
+        external_ref=request.external_ref,
+        created_after=request.created_after,
+        created_before=request.created_before,
+    )
+    query = _build_submission_query(filters)
+
+    sort_col = _ALLOWED_SEARCH_SORTS.get(request.sort_by)
+    if sort_col is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "submission_search_sort_invalid",
+                "message": f"Unsupported sort field '{request.sort_by}'.",
+                "details": {"allowed_sort_fields": sorted(_ALLOWED_SEARCH_SORTS)},
+            },
+        )
+    sort_order = (request.sort_order or "desc").lower()
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "submission_search_sort_invalid",
+                "message": f"Unsupported sort order '{request.sort_order}'.",
+                "details": {"allowed_sort_orders": ["asc", "desc"]},
+            },
+        )
+    query = query.order_by(asc(sort_col) if sort_order == "asc" else desc(sort_col))
+
+    result = await session.exec(query)
+    submissions = list(result.all())
+    verification_data = await _load_latest_verification_data([submission.id for submission in submissions], session)
+
+    filtered: list[SubmissionSearchResultRead] = []
+    for submission in submissions:
+        verification_row = verification_data.get(submission.id)
+        verification_summary = verification_row.get("summary") if verification_row else None
+        verification_doc = verification_row.get("filter_doc") if verification_row else None
+
+        if request.verification_status and (verification_doc or {}).get("status") != request.verification_status:
+            continue
+        if request.verification_decision and (verification_doc or {}).get("decision") != request.verification_decision:
+            continue
+        if request.verification_kyc_level and (verification_doc or {}).get("kyc_level") != request.verification_kyc_level:
+            continue
+        if request.verification_current_step_key and (verification_doc or {}).get("current_step_key") != request.verification_current_step_key:
+            continue
+
+        matches = True
+        for criterion in request.criteria:
+            definition = configured[criterion.key]
+            actual = _resolve_search_value(
+                submission,
+                source=definition.source,
+                path=definition.path,
+                verification_doc=verification_doc,
+            )
+            if not _matches_search_operator(actual, criterion.op, criterion.value):
+                matches = False
+                break
+        if not matches:
+            continue
+
+        filtered.append(_serialize_submission_row(submission, verification=verification_summary))
+
+    return filtered[request.skip : request.skip + request.limit]
 
 
 async def get_submission(
@@ -526,6 +977,8 @@ async def get_submission_with_merged_template(
 
     # Get comments
     comments = await list_comments(submission_id, session)
+    from app.services.verifications import service as verification_svc
+    verification = await verification_svc.get_latest_verification_run(submission_id, session)
 
     return {
         "submission": submission,
@@ -535,4 +988,5 @@ async def get_submission_with_merged_template(
         "ungrouped_questions": ungrouped_questions,
         "status_history": submission.status_history,
         "comments": comments,
+        "verification": verification,
     }

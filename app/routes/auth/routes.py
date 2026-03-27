@@ -28,7 +28,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import get_settings
 from app.core.auth import AuthContext, require_role
-from app.core.authz import get_effective_policy, known_permissions, resolve_permissions_and_columns
+from app.core.authz import effective_authz_roles, get_effective_policy, known_permissions, resolve_permissions_and_columns
 from app.db.session import get_public_session
 from app.db.session import async_session_factory
 from app.models.public.tenant import Tenant
@@ -154,7 +154,7 @@ async def _client_for_realm_async(realm: str, *, client_alias: str | None = None
 
     async def _db_lookup() -> tuple[str, str | None] | None:
         async with async_session_factory() as session:
-            stmt = select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.schema_name == realm))
+            stmt = select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.tenant_key == realm))
             result = await session.execute(stmt)
             tenant = result.scalars().first()
             if tenant and tenant.keycloak_client_id:
@@ -248,7 +248,7 @@ async def _warn_if_default_client_mismatch(realm: str) -> None:
     async def _db_check() -> None:
         async with async_session_factory() as session:
             result = await session.execute(
-                select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.schema_name == realm))
+                select(Tenant).where((Tenant.keycloak_realm == realm) | (Tenant.tenant_key == realm))
             )
             tenant = result.scalars().first()
             if tenant and tenant.keycloak_client_id and tenant.keycloak_client_id != default_cid:
@@ -552,6 +552,61 @@ async def refresh(
     return _safe_json_response(resp)
 
 
+@router.post("/service-token/{realm}")
+async def service_token(
+    realm: str,
+    request: Request,
+) -> Any:
+    """Client-credentials token flow for machine-to-machine tenant integrations."""
+    await _realm_allowed(realm)
+    await _warn_if_default_client_mismatch(realm)
+    body = await _read_body(request)
+    client_alias = body.get("client") or body.get("client_alias")
+    if client_alias is not None and (not isinstance(client_alias, str) or not client_alias.strip()):
+        raise _bad_request("client must be a non-empty string when provided.")
+    scope = body.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not scope.strip()):
+        raise _bad_request("scope must be a non-empty string when provided.")
+
+    client_id, client_secret = await _client_for_realm_async(
+        realm,
+        client_alias=client_alias.strip() if isinstance(client_alias, str) else None,
+    )
+    data: dict[str, Any] = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+    }
+    if client_secret:
+        data["client_secret"] = client_secret
+    if isinstance(scope, str) and scope.strip():
+        data["scope"] = scope.strip()
+
+    resp = await _post_to_keycloak_realm_with_fallback(realm, data=data)
+    if resp.status_code in (400, 401):
+        debug_details = None
+        if get_settings().DEBUG:
+            try:
+                debug_details = {
+                    "upstream_status": resp.status_code,
+                    "upstream_url": str(getattr(getattr(resp, "request", None), "url", "") or ""),
+                    "upstream": resp.json(),
+                }
+            except Exception:  # noqa: BLE001
+                debug_details = {
+                    "upstream_status": resp.status_code,
+                    "upstream_url": str(getattr(getattr(resp, "request", None), "url", "") or ""),
+                    "upstream_body_prefix": (getattr(resp, "text", "") or "")[:500],
+                }
+        raise _unauthorized(
+            "Invalid service client credentials.",
+            code="invalid_client_credentials",
+            details=debug_details,
+        )
+    if resp.status_code != 200:
+        raise _upstream_unavailable(resp)
+    return _safe_json_response(resp)
+
+
 @router.get("/me")
 async def me(
     request: Request,
@@ -580,7 +635,7 @@ async def me(
             tenant_uuid = uuid.UUID(tenant_ident)
             clause = Tenant.id == tenant_uuid
         except Exception:  # noqa: BLE001
-            clause = (Tenant.schema_name == tenant_ident) | (Tenant.keycloak_realm == tenant_ident)
+            clause = (Tenant.tenant_key == tenant_ident) | (Tenant.keycloak_realm == tenant_ident)
         try:
             r = await session.execute(select(Tenant).where(clause))
             tenant = r.scalars().first()
@@ -589,7 +644,7 @@ async def me(
             tenant = None
 
     tenant_uuid_str = str(tenant.id) if tenant else None
-    realm_key = tenant.schema_name if tenant else (realm_name or tenant_ident or None)
+    realm_key = tenant.tenant_key if tenant else (realm_name or tenant_ident or None)
 
     # Resolve effective policy docs. If unavailable (e.g., DB/migration issues),
     # fall back to code defaults so `/me` remains informative.
@@ -601,7 +656,7 @@ async def me(
         bundle = {"global": {}, "realm": {}, "tenant": {}}
 
     perms, columns = resolve_permissions_and_columns(
-        set(ctx.roles),
+        effective_authz_roles(ctx),
         global_doc=bundle.get("global") if isinstance(bundle.get("global"), dict) else {},
         realm_doc=bundle.get("realm") if isinstance(bundle.get("realm"), dict) else None,
         tenant_doc=bundle.get("tenant") if isinstance(bundle.get("tenant"), dict) else None,
@@ -617,7 +672,7 @@ async def me(
         "realm": realm_name,
         "resolved_tenant": {
             "id": tenant_uuid_str,
-            "schema_name": getattr(tenant, "schema_name", None),
+            "tenant_key": getattr(tenant, "tenant_key", None),
             "keycloak_realm": getattr(tenant, "keycloak_realm", None),
         },
         "request": {

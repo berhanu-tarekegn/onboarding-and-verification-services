@@ -26,6 +26,7 @@ from app.core.errors import add_exception_handlers
 from app.db.session import dispose_engines
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.tenants import TenantMiddleware
+from app.temporal import client as temporal_client
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +57,17 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """
     await startup_jwks_refresh()
 
-    # if settings.TEMPORAL_ENABLED:
-    #     try:
-    #         await temporal_client.connect()
-    #     except Exception as exc:
-    #         if settings.TEMPORAL_REQUIRED:
-    #             raise
-    #         logger.warning(
-    #             "Temporal connection failed; continuing without Temporal "
-    #             "(error: %s). Set TEMPORAL_REQUIRED=true to fail fast.",
-    #             exc,
-    #         )
+    if settings.TEMPORAL_ENABLED:
+        try:
+            await temporal_client.connect()
+        except Exception as exc:
+            if settings.TEMPORAL_REQUIRED:
+                raise
+            logger.warning(
+                "Temporal connection failed; continuing without Temporal "
+                "(error: %s). Set TEMPORAL_REQUIRED=true to fail fast.",
+                exc,
+            )
     yield
     await shutdown_jwks_refresh()
     await dispose_engines()
@@ -105,8 +106,10 @@ _CONSTRAINT_MESSAGES: dict[str, str] = {
     # Submission answers
     "uq_answer_submission_question": "An answer for this question already exists in the submission.",
     # Tenants
-    "tenants_schema_name_key": "A tenant with this schema_name already exists.",
-    "ix_tenants_schema_name": "A tenant with this schema_name already exists.",
+    "tenants_schema_name_key": "A tenant with this tenant_key already exists.",
+    "ix_tenants_schema_name": "A tenant with this tenant_key already exists.",
+    "uq_tenants_tenant_key": "A tenant with this tenant_key already exists.",
+    "ix_tenants_tenant_key": "A tenant with this tenant_key already exists.",
     # Baseline templates
     "uq_baseline_template_type_level": "A baseline template with this template_type and level already exists.",
     # Products

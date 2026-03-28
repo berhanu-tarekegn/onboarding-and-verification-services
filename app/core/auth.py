@@ -198,6 +198,8 @@ def _trusted_issuer_bases() -> list[str]:
 
 def _issuer_allowed(issuer: str) -> bool:
     settings = get_settings()
+    if settings.MOBILE_AUTH_ENABLED and issuer == (settings.MOBILE_AUTH_ISSUER or "").strip():
+        return True
     if settings.AUTH_ISSUERS:
         return issuer in set(_parse_csv(settings.AUTH_ISSUERS))
 
@@ -366,16 +368,6 @@ async def decode_jwt(token: str) -> dict[str, Any]:
         raise _unauthorized("Authentication is disabled")
 
     try:
-        header = jwt.get_unverified_header(token)
-    except Exception as exc:
-        raise _unauthorized("Invalid token") from exc
-
-    kid = header.get("kid")
-    if not isinstance(kid, str) or not kid:
-        raise _unauthorized("Invalid token")
-
-    # Determine issuer early (before verifying) so we can resolve the right JWKS.
-    try:
         unverified = jwt.get_unverified_claims(token)
     except Exception as exc:
         raise _unauthorized("Invalid token") from exc
@@ -383,6 +375,36 @@ async def decode_jwt(token: str) -> dict[str, Any]:
     if not isinstance(issuer, str) or not issuer:
         raise _unauthorized("Invalid token")
     if not _issuer_allowed(issuer):
+        raise _unauthorized("Invalid token")
+
+    # Local mobile-session tokens are verified with a shared secret instead of JWKS.
+    if settings.MOBILE_AUTH_ENABLED and issuer == (settings.MOBILE_AUTH_ISSUER or "").strip():
+        secret = (settings.MOBILE_AUTH_HS256_SECRET or "").strip()
+        if not secret:
+            raise _unauthorized("Invalid token")
+        options = {"verify_aud": settings.AUTH_AUDIENCE is not None}
+        try:
+            payload = jwt.decode(
+                token,
+                key=secret,
+                algorithms=["HS256"],
+                audience=settings.AUTH_AUDIENCE,
+                options=options,
+            )
+        except JWTError as exc:
+            raise _unauthorized("Invalid token") from exc
+        issuer2 = payload.get("iss")
+        if not isinstance(issuer2, str) or issuer2 != issuer:
+            raise _unauthorized("Invalid token")
+        return payload
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except Exception as exc:
+        raise _unauthorized("Invalid token") from exc
+
+    kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
         raise _unauthorized("Invalid token")
 
     # Prefer static merged JWKS if it contains the key (fast path).

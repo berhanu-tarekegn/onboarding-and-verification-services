@@ -1,0 +1,20 @@
+name: flutter_ov_device_auth
+description: Flutter SDK for mobile device challenge authentication against O&V backend.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cryptography: ^2.7.0
+  flutter_secure_storage: ^9.2.2
+  http: ^1.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

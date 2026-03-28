@@ -146,6 +146,7 @@ For the cleanest local setup and end-to-end demo flow, start with:
 
 - [docs/demo/README.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/README.md)
 - [docs/demo/end_to_end_product_simulation.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/demo/end_to_end_product_simulation.md)
+- [docs/mobile_device_auth.md](/Users/berhanu.tarekegn/git/onboarding-and-verification/docs/mobile_device_auth.md) for the recommended OTP-bootstrap + device-challenge mobile login flow
 
 ### Option 1: Docker (Recommended)
 

@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     #
     # When a token contains more than one role in the same group, requests are rejected (403).
     AUTH_EXCLUSIVE_ROLE_GROUPS: str = "maker|checker"
+    # Local mobile session issuer for device-challenge logins.
+    MOBILE_AUTH_ENABLED: bool = False
+    MOBILE_AUTH_ISSUER: str = "ov-mobile"
+    MOBILE_AUTH_HS256_SECRET: str = ""
+    MOBILE_AUTH_ACCESS_TOKEN_TTL_SECONDS: int = 15 * 60
+    MOBILE_AUTH_CHALLENGE_TTL_SECONDS: int = 2 * 60
 
     # JWKS sources (at least one required when AUTH_ENABLED=true)
     KEYCLOAK_JWKS_URL: str = ""

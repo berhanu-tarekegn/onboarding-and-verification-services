@@ -14,6 +14,7 @@ from app.models.public.tenant import Tenant
 from app.models.public.baseline_template import BaselineTemplate, BaselineTemplateDefinition
 from app.models.public.authz_policy import AuthzPolicy
 from app.models.public.identity_link import IdentityLink
+from app.models.public.device_auth import DeviceCredential, DeviceChallenge
 
 __all__ = [
     "Tenant",
@@ -21,4 +22,6 @@ __all__ = [
     "BaselineTemplateDefinition",
     "AuthzPolicy",
     "IdentityLink",
+    "DeviceCredential",
+    "DeviceChallenge",
 ]
